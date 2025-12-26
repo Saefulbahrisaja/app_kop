@@ -8,5 +8,6 @@ use Illuminate\Database\Eloquent\Model;
 class ModelSimpanan extends Model
 {
     protected $table = 'simpanan';
-    protected $fillable = ['user_id','type','balance'];
+    protected $fillable = ['user_id','type','amount','period'];
+    
 }

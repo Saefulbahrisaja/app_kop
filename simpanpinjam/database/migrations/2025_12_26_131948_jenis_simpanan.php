@@ -11,14 +11,15 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('simpanan', function (Blueprint $table) {
+        Schema::create('jenis_simpanan', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained('user')->onDelete('cascade');
-            $table->enum('type', ['pokok','wajib','manasuka']);
-            $table->bigInteger('amount')->default(0);
-             $table->date('period')->nullable();
+            $table->string('code')->unique();   // POKOK, WAJIB, MANASUKA
+            $table->string('name');
+            $table->integer('amount')->default(0);
+            $table->boolean('mandatory')->default(false);
             $table->timestamps();
         });
+
     }
 
     /**
@@ -26,6 +27,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('simpanan');
+        //
     }
 };

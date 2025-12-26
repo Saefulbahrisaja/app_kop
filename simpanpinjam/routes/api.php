@@ -16,7 +16,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', fn (Request $request) => $request->user());
 
     // ✅ Simpanan
-    Route::get('/savings', [SimpananController::class, 'index']);
+    Route::get('/savings', [SimpananController::class, 'index']);        
+    Route::post('/savings/deposit', [SimpananController::class, 'store']);
+    Route::get('/savings/history', [SimpananController::class, 'history']); 
+    Route::get('/savings/total', [SimpananController::class, 'totalByType']);
+    Route::get('/savings/mutations', [SimpananController::class, 'mutations']);
+    Route::post('/savings/withdraw', [SimpananController::class, 'withdraw']);
+    Route::get('/savings/withdrawals', [SimpananController::class, 'withdrawalHistory']);
+
 
     // ✅ Pinjaman
     Route::get('/loans', [PinjamanController::class, 'index']);
@@ -32,6 +39,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('can:approve-payment')->group(function () {
         Route::post('/payments/{payment}/approve', [CicilanController::class, 'approvePayment']);
         Route::post('/payments/{payment}/reject',  [CicilanController::class, 'rejectPayment']);
+    });
+    Route::middleware('can:approve-withdrawal')->group(function () {
+        Route::post('/withdrawals/{withdrawal}/approve', [SimpananController::class, 'approveWithdrawal']);
+        Route::post('/withdrawals/{withdrawal}/reject',  [SimpananController::class, 'rejectWithdrawal']);
     });
     Route::middleware('can:approve-loan')->group(function () {
         Route::post('/loans/{loan}/approve', [PinjamanController::class, 'approveLoan']);

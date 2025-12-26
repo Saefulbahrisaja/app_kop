@@ -5,17 +5,10 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\ModelPinjaman;
 use App\Models\ModelCicilan;
-use App\Services\FirebaseService;
 
 class PinjamanController extends Controller
 {
-    protected $fcm;
-
-    public function __construct(FirebaseService $fcm)
-    {
-        $this->fcm = $fcm;
-    }
-
+   
     // ✅ Menampilkan semua pinjaman user
     public function index(Request $r)
     {
@@ -152,18 +145,6 @@ class PinjamanController extends Controller
             'note'   => $r->note ?? null,
         ]);
 
-        // ✅ Kirim notifikasi ke semua anggota (via Firebase)
-        $title = "Status Pinjaman #{$loan->id}";
-        $body  = "Pinjaman Anda telah {$r->status}.";
-        $this->fcm->sendToTopic('pinjaman_update', $title, $body, [
-            'loan_id' => $loan->id,
-            'status'  => $loan->status,
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => "Pinjaman berhasil diperbarui menjadi {$loan->status}",
-            'loan'    => $loan
-        ]);
+        
     }
 }
