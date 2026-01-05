@@ -12,7 +12,12 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // $schedule->command('inspire')->hourly();
+        // 🗓️ Jalankan setiap awal bulan, jam 01:00
+        $schedule->command('app:cleanup-orphan-proofs')
+            ->monthlyOn(1, '01:00')
+            ->withoutOverlapping()
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/cleanup-proofs.log'));
     }
 
     /**

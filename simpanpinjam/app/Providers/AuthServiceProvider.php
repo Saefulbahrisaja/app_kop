@@ -25,7 +25,9 @@ class AuthServiceProvider extends ServiceProvider
         // ✅ Gate untuk approve-payment
         Gate::define('approve-payment', [PaymentPolicy::class, 'approvePayment']);
         Gate::define('reject-payment', [PaymentPolicy::class, 'rejectPayment']);
+        Gate::define('approve-withdrawal', function ($user) {
+            return $user->role === 'BENDAHARA';});
         Gate::define('approve-loan', function ($user) {
-                return $user->role === 'KETUA';});
+            return $user->role === 'KETUA';});
     }
 }

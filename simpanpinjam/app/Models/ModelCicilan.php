@@ -16,8 +16,15 @@ class ModelCicilan extends Model
         'loan_id','amount','due_date','paid_at'
     ];
 
+     protected $casts = [
+        'due_date' => 'date',
+        'paid_at'  => 'datetime'
+    ];
+
+
     public function loan()
     {
         return $this->belongsTo(ModelPinjaman::class, 'loan_id');
     }
+    
 }

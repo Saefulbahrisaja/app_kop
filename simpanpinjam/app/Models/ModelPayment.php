@@ -21,6 +21,7 @@ class ModelPayment extends Model
         'status',
         'note',
         'proof',
+        'simpanan_id',
         'approved_at',
         'rejected_at',
     ];
@@ -46,6 +47,11 @@ class ModelPayment extends Model
 
     public function user()
     {
-        return $this->belongsTo(ModelUser::class, 'user_id');
+        return $this->belongsTo(ModelUser::class);
     }
+
+    public function simpanan()
+{
+    return $this->belongsTo(ModelSimpanan::class, 'simpanan_id');
+}
 }

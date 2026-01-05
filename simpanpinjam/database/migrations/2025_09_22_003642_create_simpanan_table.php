@@ -16,7 +16,9 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained('user')->onDelete('cascade');
             $table->enum('type', ['pokok','wajib','manasuka']);
             $table->bigInteger('amount')->default(0);
-             $table->date('period')->nullable();
+            $table->dateTime('paid_at')->nullable();
+            $table->dateTime('approved_at')->nullable();
+            $table->date('period')->nullable();
             $table->timestamps();
         });
     }

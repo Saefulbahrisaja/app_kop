@@ -13,9 +13,10 @@ return new class extends Migration
     {
         Schema::create('jenis_simpanan', function (Blueprint $table) {
             $table->id();
-            $table->string('code')->unique();   // POKOK, WAJIB, MANASUKA
+            $table->string('code');   // POKOK, WAJIB, MANASUKA
             $table->string('name');
             $table->integer('amount')->default(0);
+            $table->year('periode')->nullable();
             $table->boolean('mandatory')->default(false);
             $table->timestamps();
         });

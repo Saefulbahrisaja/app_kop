@@ -6,6 +6,7 @@ use Carbon\Carbon;
 use App\Models\ModelSimpanan;
 use App\Models\Modeljenissimpanan as SavingType;
 use App\Models\Modeltariksimpanan as SavingWithdrawal;
+use Illuminate\Support\Facades\DB;
 
 class SimpananController extends Controller
 {
@@ -13,57 +14,36 @@ class SimpananController extends Controller
      * LIST SIMPANAN YANG MUNCUL DI APLIKASI
      */
     public function index(Request $r)
-    {
-        $user  = $r->user();
-        $month = now()->startOfMonth();
+{
+    $user = $r->user();
 
-        $pokokType    = SavingType::where('code','POKOK')->first();
-        $wajibType    = SavingType::where('code','WAJIB')->first();
-        $manasukaType = SavingType::where('code','MANASUKA')->first();
+    $simpanan = $user->savings()
+        ->whereNotNull('paid_at')              // ✅ sudah dibayar
+        ->orderBy('paid_at', 'desc')
+        ->get()
+        ->map(function ($s) {
 
-        $pokokExists = $user->savings()
-            ->where('type','pokok')
-            ->exists();
+            $jenis = SavingType::where('code', strtoupper($s->type))->first();
 
-        $pokok = $pokokExists ? null : [
-            'code'      => $pokokType->code,
-            'type'      => 'pokok',
-            'name'      => $pokokType->name,
-            'amount'    => $pokokType->amount,
-            'mandatory' => (bool) $pokokType->mandatory
-        ];
+            return [
+                'code'       => $jenis?->code,
+                'type'       => $s->type,
+                'name'       => $jenis?->name,
+                'amount'     => (float) $s->amount,      // ✅ amount real
+                'paid_at'    => $s->paid_at
+                                    ? Carbon::parse($s->period)->format('Y-m-d')
+                                    : null,
+                'period'     => $s->period
+                                    ? Carbon::parse($s->period)->format('Y-m')
+                                    : null,
+                'mandatory'  => (bool) ($jenis?->mandatory ?? false),
+            ];
+        });
 
-        
-        $wajibExists = $user->savings()
-            ->where('type','wajib')
-            ->where('period',$month)
-            ->exists();
-
-        $wajib = $wajibExists ? null : [
-            'code'      => $wajibType->code,
-            'type'      => 'wajib',
-            'name'      => $wajibType->name,
-            'amount'    => $wajibType->amount,
-            'period'    => $month->format('Y-m'),
-            'mandatory' => (bool) $wajibType->mandatory
-        ];
-
-        $manasuka = [
-            'code'      => $manasukaType->code,
-            'type'      => 'manasuka',
-            'name'      => $manasukaType->name,
-            'amount'    => $manasukaType->amount,
-            'mandatory' => (bool) $manasukaType->mandatory
-        ];
-
-        return response()->json([
-            'data' => array_values(array_filter([
-                $pokok,
-                $wajib,
-                $manasuka
-            ]))
-        ]);
-    }
+    return response()->json([
+        'data' => $simpanan
+    ]);
+}
 
     public function store(Request $r)
     {
@@ -127,32 +107,47 @@ class SimpananController extends Controller
         ]);
     }
 
-    public function totalByType(Request $r)
+   public function totalByType(Request $r)
     {
+        $data = $r->user()->savings()
+            ->whereNotNull('paid_at')
+            ->whereNotNull('approved_at')
+            ->selectRaw('type, COALESCE(SUM(amount),0) as total')
+            ->groupBy('type')
+            ->get();
+
+        // Cek apakah collection kosong
+        if ($data->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data saldo belum tersedia',
+                'data'    => []
+            ], 200);
+        }
+
         return response()->json([
-            'data' => $r->user()->savings()
-                ->selectRaw('type, SUM(amount) as total')
-                ->groupBy('type')
-                ->get()
+            'success' => true,
+            'message' => 'Data berhasil diambil',
+            'data'    => $data
         ]);
     }
+
+
 
     public function mutations(Request $r)
     {
         $mutations = $r->user()->savings()
-            ->orderBy('created_at')
+            ->whereNotNull('paid_at')                 // ✅ hanya yang sudah dibayar
+            ->orderBy('paid_at')                      // ✅ urut berdasarkan tanggal bayar
             ->get();
-
         $saldo = 0;
-
         $data = $mutations->map(function ($row) use (&$saldo) {
-            $saldo += $row->amount;
-
+            $saldo += (float) $row->amount;
             return [
-                'date'    => $row->created_at->format('Y-m-d'),
-                'type'    => $row->type,
-                'amount'  => $row->amount,
-                'saldo'   => $saldo
+                'date'   => Carbon::parse($row->paid_at)->format('Y-m-d'),
+                'type'   => $row->type,                // pokok / wajib / manasuka
+                'amount' => (float) $row->amount,
+                'saldo'  => $saldo
             ];
         });
 
@@ -229,31 +224,51 @@ class SimpananController extends Controller
 
 
     
-    public function approveWithdrawal(SavingWithdrawal $withdrawal)
+     public function approveWithdrawal(SavingWithdrawal $withdrawal)
     {
         if ($withdrawal->status !== 'PENDING') {
-            return response()->json(['message'=>'Sudah diproses'],422);
+            return response()->json([
+                'message' => 'Pengajuan sudah diproses'
+            ], 422);
         }
 
-        $user = $withdrawal->user;
+        DB::transaction(function () use ($withdrawal) {
 
-        // Catat sebagai mutasi negatif
-        $currentBalance = $user->savings()->sum('amount');
+            $user = $withdrawal->user;
 
-        $user->savings()->create([
-            'type'   => $withdrawal->type,
-            'amount' => -$withdrawal->amount,
-            'period' => null,
-            'balance_after' => $currentBalance - $withdrawal->amount
+            $saldo = $user->savings()
+                ->where('type', $withdrawal->type)
+                ->sum('amount');
+
+            if ($saldo < $withdrawal->amount) {
+                throw new \Exception('Saldo tidak mencukupi');
+            }
+
+            $currentBalance = $user->savings()->sum('amount');
+
+            $user->savings()->create([
+                'type'          => $withdrawal->type,
+                'amount'        => -$withdrawal->amount, // ⬅️ POTONG SALDO
+                'period'        => null,
+                'balance_after' => $currentBalance - $withdrawal->amount
+            ]);
+
+            $withdrawal->update([
+                'status' => 'APPROVED'
+            ]);
+        });
+
+        return response()->json([
+            'message' => 'Penarikan berhasil disetujui dan saldo telah dikurangi'
         ]);
-
-        $withdrawal->update(['status'=>'APPROVED']);
-
-        return response()->json(['message'=>'Penarikan disetujui']);
     }
 
     public function rejectWithdrawal(SavingWithdrawal $withdrawal)
     {
+        if ($withdrawal->status !== 'PENDING') {
+            return response()->json(['message'=>'Pengajuan sudah diproses'],422);
+        }
+
         $withdrawal->update(['status'=>'REJECTED']);
         return response()->json(['message'=>'Penarikan ditolak']);
     }
@@ -277,6 +292,8 @@ class SimpananController extends Controller
             'data' => $withdrawals
         ]);
     }
+
+    
 
 
 
