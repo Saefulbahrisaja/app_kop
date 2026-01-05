@@ -10,17 +10,21 @@ return new class extends Migration {
         Schema::create('payment', function (Blueprint $table) {
             $table->id();
 
-            // Relasi ke tabel pinjaman & cicilan & user
-            $table->foreignId('loan_id')
+            // Relasi ke tabel pinjaman & cicilan & user & simpanan
+            $table->foreignId('loan_id')->nullable()
                   ->constrained('pinjaman')
                   ->onDelete('cascade');
 
-            $table->foreignId('installment_id')
+            $table->foreignId('installment_id')->nullable()
                   ->constrained('cicilan')
                   ->onDelete('cascade');
 
-            $table->foreignId('user_id')
+            $table->foreignId('user_id')->nullable()
                   ->constrained('user')
+                  ->onDelete('cascade');
+
+            $table->foreignId('simpanan_id')->nullable()
+                  ->constrained('simpanan')
                   ->onDelete('cascade');
 
             $table->decimal('amount', 15, 2);

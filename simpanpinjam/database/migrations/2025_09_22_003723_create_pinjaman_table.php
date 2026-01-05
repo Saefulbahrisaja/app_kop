@@ -16,6 +16,8 @@ return new class extends Migration
             $table->foreignId('user_id')->constrained('user')->onDelete('cascade');
             $table->bigInteger('amount');
             $table->integer('term_months');
+            $table->dateTime('approved_at')->nullable();
+            $table->text('note')->nullable();
             $table->enum('loan_type', ['REGULER','TALANGAN'])->default('REGULER');
             $table->enum('status', ['PENDING','APPROVED','REJECTED','LUNAS'])->default('PENDING');
             $table->timestamps();

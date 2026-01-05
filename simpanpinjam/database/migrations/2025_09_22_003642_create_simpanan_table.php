@@ -14,8 +14,11 @@ return new class extends Migration
         Schema::create('simpanan', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained('user')->onDelete('cascade');
-            $table->string('type');
-            $table->bigInteger('balance')->default(0);
+            $table->enum('type', ['pokok','wajib','manasuka']);
+            $table->bigInteger('amount')->default(0);
+            $table->dateTime('paid_at')->nullable();
+            $table->dateTime('approved_at')->nullable();
+            $table->date('period')->nullable();
             $table->timestamps();
         });
     }

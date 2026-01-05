@@ -1,15 +1,11 @@
 <?php
-
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Foundation\Auth\User as Authenticatable; // ✅ ganti dari Model → Authenticatable
+use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Contracts\Auth\Access\Authorizable as AuthorizableContract;
 use Illuminate\Foundation\Auth\Access\Authorizable;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Notifications\Notifiable;
-use App\Models\ModelSimpanan;
-use App\Models\ModelPinjaman;
 
 class ModelUser extends Authenticatable implements AuthorizableContract
 {
@@ -27,16 +23,19 @@ class ModelUser extends Authenticatable implements AuthorizableContract
         'tanggal_gabung',
         'no_hp',
         'email',
-        'no_anggota'
+        'no_anggota',
+        'role'
     ];
 
     protected $hidden = ['password'];
 
+    
     public function savings()
     {
         return $this->hasMany(ModelSimpanan::class, 'user_id');
     }
 
+    
     public function loans()
     {
         return $this->hasMany(ModelPinjaman::class, 'user_id');
