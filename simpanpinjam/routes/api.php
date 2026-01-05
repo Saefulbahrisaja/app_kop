@@ -7,6 +7,7 @@ use App\Http\Controllers\PinjamanController;
 use App\Http\Controllers\SimpananController;
 use App\Http\Controllers\CicilanController;
 use App\Http\Controllers\BendaharaController;
+use App\Http\Controllers\LpjController;
 
 /*
 |--------------------------------------------------------------------------
@@ -82,9 +83,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // ===== DASHBOARD BENDAHARA =====
         Route::prefix('bendahara')->group(function () {
-            Route::get('/dashboard',                 [BendaharaController::class, 'dashboard']);
-            Route::get('/tunggakan',                 [BendaharaController::class, 'tunggakan']);
-            Route::get('/setoran',                   [BendaharaController::class, 'setoran']);
             Route::get('/anggota/{id}',              [BendaharaController::class, 'detailAnggota']);
             Route::get('/saldo-simpanan',             [BendaharaController::class, 'saldoSimpanan']);
            
@@ -107,7 +105,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/dashboard',                 [BendaharaController::class, 'dashboard']);
         Route::get('/bendahara/grafik-kas-tahunan',         [BendaharaController::class, 'grafikKasTahunan']);
         Route::get('/bendahara/grafik/piutang',             [BendaharaController::class, 'grafikSisaPiutang']);
+        Route::get('/bendahara/piutang-per-anggota', [BendaharaController::class, 'grafikSisaPiutangPerAnggota']);
+        Route::get('/bendahara/proyeksi-piutang',    [BendaharaController::class, 'proyeksiPiutang']);
+        Route::get('/bendahara/tunggakan',                 [BendaharaController::class, 'tunggakan']);
+        Route::get('/bendahara/setoran',                   [BendaharaController::class, 'setoran']);
+        Route::get('/bendahara/dashboard',                 [BendaharaController::class, 'dashboard']);
+        Route::get('/lpj',     [LpjController::class,'lpj']);
+        Route::get('/lpj/pdf', [LpjController::class,'lpjPdf']);
             
+     
     });
 
     /*
@@ -117,9 +123,8 @@ Route::middleware('auth:sanctum')->group(function () {
     */
     Route::middleware('role:KETUA')->group(function () {
         Route::post('/loans/{loan}/approve', [PinjamanController::class, 'approveLoan']);
-        Route::get('/grafik/piutang-per-anggota', [BendaharaController::class, 'grafikSisaPiutangPerAnggota']);
-        Route::get('/grafik/proyeksi-piutang',    [BendaharaController::class, 'proyeksiPiutang']);
-     
+       
+   
     });
 
 });

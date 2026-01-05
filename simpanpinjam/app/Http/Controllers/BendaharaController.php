@@ -9,6 +9,7 @@ use App\Models\ModelUser;
 use App\Models\ModelCicilan;
 use Carbon\Carbon;
 use App\Services\KasKoperasiService;
+use App\Services\StatusSaldoService;
 
 class BendaharaController extends Controller
 {
@@ -20,31 +21,43 @@ class BendaharaController extends Controller
    public function dashboard(
     KasKoperasiService $kas,
     PiutangService $piutang,
-    SimpananService $simpanan
+    SimpananService $simpanan,
+    StatusSaldoService $statusSaldoService
 ) {
-    $kasData = $kas->kasSummary();
-    $piutangData = $piutang->summary();
-    $simpanan=$simpanan->summary();
+    $kasData      = $kas->kasSummary();
+    $piutangData  = $piutang->summary();
+    $simpananData = $simpanan->summary();
 
+    $saldo        = (float) ($kasData['saldo'] ?? 0);
+    $sisaPiutang  = (float) ($piutangData['sisa_piutang'] ?? 0);
+
+    // 🔑 hitung status saldo via service
+    $statusSaldo = $statusSaldoService->hitung(
+        $saldo,
+        $sisaPiutang
+    );
 
     return response()->json([
         'simpanan' => [
-                    'pokok'   => $simpanan['pokok'],
-                    'wajib'  => $simpanan['wajib'],
-                    'manasuka' => $simpanan['manasuka'],
-                ],
+            'pokok'    => $simpananData['pokok'] ?? 0,
+            'wajib'    => $simpananData['wajib'] ?? 0,
+            'manasuka' => $simpananData['manasuka'] ?? 0,
+        ],
 
         'kas' => [
-            'saldo'   => $kasData['saldo'],
-            'inflow'  => $kasData['inflow'],
-            'outflow' => $kasData['outflow'],
+            'saldo'   => $saldo,
+            'inflow'  => $kasData['inflow'] ?? 0,
+            'outflow' => $kasData['outflow'] ?? 0,
         ],
 
         'piutang' => [
-            'total_pinjaman' => $piutangData['total_pinjaman'],
-            'terbayar'       => $piutangData['total_terbayar'],
-            'sisa'           => $piutangData['sisa_piutang'],
+            'total_pinjaman' => $piutangData['total_pinjaman'] ?? 0,
+            'terbayar'       => $piutangData['total_terbayar'] ?? 0,
+            'sisa'           => $sisaPiutang,
         ],
+
+        // ✅ sekarang selalu ada
+        'status_saldo' => $statusSaldo,
     ]);
 }
 
