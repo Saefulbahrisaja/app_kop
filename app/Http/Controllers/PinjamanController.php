@@ -8,30 +8,55 @@ use App\Models\ModelCicilan;
 use App\Services\LoanLimitService;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\ModelUser;
+use App\Notifications\LoanStatusChanged;
 
 class PinjamanController extends Controller
 {
-   
-    // ✅ Menampilkan semua pinjaman user
+    /*
+    |--------------------------------------------------------------------------
+    | LIST PINJAMAN USER
+    |--------------------------------------------------------------------------
+    */
     public function index(Request $r)
     {
-        $loans = $r->user()->loans()->orderBy('created_at', 'desc')->get();
+        $loans = $r->user()
+            ->loans()
+            ->orderBy('created_at', 'desc')
+            ->get();
+
         return response()->json(['loans' => $loans]);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | LIST PENGAJUAN (BENDAHARA / KETUA)
+    |--------------------------------------------------------------------------
+    */
     public function listPengajuan(Request $request)
     {
-        // hanya admin / ketua (opsional tapi disarankan)
-        if (!in_array($request->user()->role, ['BENDAHARA', 'KETUA'])) {
-            return response()->json(['error' => 'Unauthorized'], 403);
+        $user = $request->user();
+
+        if (!in_array($user->role, ['BENDAHARA', 'KETUA'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
         }
 
-        $query = ModelPinjaman::query()
-            ->with(['user:id,full_name'])
-            ->where('status', 'PENDING')
+        $query = ModelPinjaman::with('user:id,full_name')
             ->orderBy('created_at', 'desc');
 
-        // 🔍 filter opsional
+        // Filter berdasarkan role
+        if ($user->role === 'BENDAHARA') {
+            $query->where('status', 'PENDING');
+        }
+
+        if ($user->role === 'KETUA') {
+            $query->where('status', 'APPROVED_BENDAHARA');
+        }
+
+        // Filter opsional
         if ($request->filled('loan_type')) {
             $query->where('loan_type', $request->loan_type);
         }
@@ -40,134 +65,108 @@ class PinjamanController extends Controller
             $query->where('user_id', $request->user_id);
         }
 
-        // 📄 pagination (recommended)
         $loans = $query->paginate(10);
 
         return response()->json([
-            'total' => $loans->total(),
-            'data' => $loans->map(function ($loan) {
+            'success' => true,
+            'role'    => $user->role,
+            'total'   => $loans->total(),
+            'data'    => $loans->map(function ($loan) use ($user) {
+
+                $canApprove =
+                    ($user->role === 'BENDAHARA' && $loan->status === 'PENDING') ||
+                    ($user->role === 'KETUA' && $loan->status === 'APPROVED_BENDAHARA');
+
                 return [
                     'pinjaman_id' => $loan->id,
                     'anggota' => [
-                        'id' => $loan->user->id,
+                        'id'   => $loan->user->id,
                         'nama' => $loan->user->full_name,
                     ],
-                    'loan_type' => $loan->loan_type,
-                    'amount' => (float) $loan->amount,
-                    'term_months' => $loan->term_months,
-                    'status' => $loan->status,
-                    'note' => $loan->note,
-                    'tanggal_pengajuan' => $loan->created_at->format('Y-m-d H:i'),
+                    'loan_type'        => $loan->loan_type,
+                    'amount'           => (float) $loan->amount,
+                    'term_months'      => $loan->term_months,
+                    'status'           => $loan->status,
+                    'can_approve'      => $canApprove,
+                    'can_reject'       => $canApprove,
+                    'note'             => $loan->note,
+                    'tanggal_pengajuan'=> $loan->created_at->format('Y-m-d H:i'),
                 ];
-            })
+            }),
         ]);
     }
 
-
-    // ✅ Pengajuan pinjaman
+    /*
+    |--------------------------------------------------------------------------
+    | AJUKAN PINJAMAN
+    |--------------------------------------------------------------------------
+    */
     public function store(Request $r)
     {
         $r->validate([
-            'amount'       => 'required|numeric|min:1',
-            'term_months'  => 'required|integer|min:1',
-            'loan_type'    => 'required|in:REGULER,TALANGAN'
+            'amount'      => 'required|numeric|min:1',
+            'term_months' => 'required|integer|min:1',
+            'loan_type'   => 'required|in:REGULER,TALANGAN'
         ]);
 
         $userId   = $r->user()->id;
         $loanType = $r->loan_type;
 
-        // Ambil pinjaman aktif user
         $activeLoans = ModelPinjaman::where('user_id', $userId)
-            ->whereIn('status', ['PENDING', 'APPROVED'])
+            ->whereIn('status', ['PENDING', 'APPROVED', 'APPROVED_BENDAHARA'])
             ->get();
 
-        $hasActiveRegular  = $activeLoans->where('loan_type', 'REGULER')->isNotEmpty();
-        $hasActiveTalangan = $activeLoans->where('loan_type', 'TALANGAN')->isNotEmpty();
-
-        // =========================
-        // VALIDASI UNTUK REGULER
-        // =========================
-        if ($loanType === 'REGULER') {
-            if ($hasActiveRegular || $hasActiveTalangan) {
-                return response()->json([
-                    'error' => 'Anda tidak dapat mengajukan pinjaman REGULER karena masih ada pinjaman yang belum lunas.'
-                ], 400);
-            }
+        if ($loanType === 'REGULER' && $activeLoans->isNotEmpty()) {
+            return response()->json([
+                'error' => 'Masih ada pinjaman aktif.'
+            ], 400);
         }
 
-        // =========================
-        // VALIDASI UNTUK TALANGAN
-        // =========================
         if ($loanType === 'TALANGAN') {
-            // Tidak boleh ada TALANGAN aktif
-            if ($hasActiveTalangan) {
+            if ($activeLoans->where('loan_type', 'TALANGAN')->isNotEmpty()) {
                 return response()->json([
-                    'error' => 'Tidak dapat mengajukan TALANGAN karena masih ada pinjaman TALANGAN yang belum lunas.'
+                    'error' => 'Masih ada pinjaman talangan.'
                 ], 400);
             }
-
-            // Jika ada REGULER PENDING (belum disetujui)
-            $pendingRegular = $activeLoans->where('loan_type', 'REGULER')
-                                          ->where('status', 'PENDING')
-                                          ->isNotEmpty();
-            if ($pendingRegular) {
-                return response()->json([
-                    'error' => 'Tidak dapat mengajukan TALANGAN karena pinjaman REGULER Anda belum disetujui.'
-                ], 400);
-            }
-
-            // Jika ada REGULER APPROVED → pastikan sudah bayar minimal 1 cicilan
-            $approvedRegular = $activeLoans->where('loan_type', 'REGULER')
-                                           ->where('status', 'APPROVED')
-                                           ->first();
-
-            if ($approvedRegular) {
-                $paidInstallments = ModelCicilan::where('loan_id', $approvedRegular->id)
-                    ->whereNotNull('paid_at')
-                    ->count();
-
-                if ($paidInstallments < 1) {
-                    return response()->json([
-                        'error' => 'Anda hanya dapat mengajukan pinjaman TALANGAN jika sudah membayar minimal 1 cicilan pinjaman REGULER.'
-                    ], 400);
-                }
-            }
-
-            // Talangan selalu 1 kali cicilan
             $r->merge(['term_months' => 1]);
         }
 
-        // ✅ Buat pinjaman baru (status awal: PENDING)
         $loan = ModelPinjaman::create([
             'user_id'     => $userId,
             'amount'      => $r->amount,
             'term_months' => $r->term_months,
             'status'      => 'PENDING',
-            'loan_type'   => $loanType
+            'loan_type'   => $loanType,
         ]);
 
-        // ✅ Generate cicilan (dibulatkan ribuan ke bawah)
-        $totalAmount = $loan->amount;
-        $term = $loan->term_months;
-        $baseInstallment = floor($totalAmount / $term / 10000) * 10000;
+        // Generate cicilan
+        $base  = floor($loan->amount / $loan->term_months / 10000) * 10000;
+        $total = 0;
 
-        $totalGenerated = 0;
-        for ($i = 1; $i <= $term; $i++) {
-            $amount = ($i == $term)
-                ? $totalAmount - $totalGenerated
-                : $baseInstallment;
+        for ($i = 1; $i <= $loan->term_months; $i++) {
+            $amount = ($i === $loan->term_months)
+                ? $loan->amount - $total
+                : $base;
 
             $loan->installments()->create([
                 'amount'   => $amount,
-                'due_date' => now()->addMonths($i),
+                'due_date' => now()->addMonths($i)
             ]);
 
-            $totalGenerated += $amount;
+            $total += $amount;
         }
 
-        return response()->json(['loan' => $loan], 201);
+        return response()->json([
+            'success' => true,
+            'loan'    => $loan
+        ], 201);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | LIMIT PINJAMAN
+    |--------------------------------------------------------------------------
+    */
     public function loanLimit(Request $r, LoanLimitService $service)
     {
         $user = $r->user();
@@ -179,116 +178,124 @@ class PinjamanController extends Controller
 
         return response()->json([
             'years_as_member' => $yearsAsMember,
-            'max_amount'     => $limit['max_nominal'],
-            'max_months'       => $limit['max_tenor'],
+            'max_amount'      => $limit['max_nominal'],
+            'max_months'      => $limit['max_tenor'],
         ]);
     }
 
-  // ✅ Ketua menyetujui atau menolak pinjaman
-   public function approveLoan(Request $r, $id)
-{
-    // ===============================
-    // CEK ROLE
-    // ===============================
-    if ($r->user()->role !== 'KETUA') {
-        return response()->json([
-            'success' => false,
-            'message' => 'Persetujuan pinjaman harus disetujui oleh Ketua.'
-        ], 403);
-    }
+    /*
+    |--------------------------------------------------------------------------
+    | APPROVE / REJECT (2 TAHAP)
+    |--------------------------------------------------------------------------
+    */
+    public function approveLoan(Request $r, $id)
+    {
+        $user = $r->user();
 
-    // ===============================
-    // VALIDASI INPUT
-    // ===============================
-    $r->validate([
-        'status' => 'required|in:APPROVED,REJECTED',
-        'note'   => 'nullable|string|max:255',
-    ]);
+        $r->validate([
+            'status' => 'required|in:APPROVED,REJECTED',
+            'note'   => 'nullable|string|max:255',
+        ]);
 
-    DB::beginTransaction();
+        DB::beginTransaction();
 
-    try {
-        // ===============================
-        // AMBIL DATA PINJAMAN
-        // ===============================
-        $loan = ModelPinjaman::findOrFail($id);
+        try {
+            $loan      = ModelPinjaman::findOrFail($id);
+            $oldStatus = $loan->status;
 
-        // ===============================
-        // CEK STATUS SEBELUMNYA
-        // ===============================
-        if ($loan->status !== 'PENDING') {
+            // ================= BENDAHARA =================
+            if ($user->role === 'BENDAHARA') {
+
+                if ($loan->status !== 'PENDING') {
+                    throw new \Exception('Pinjaman sudah diproses.');
+                }
+
+                if ($r->status === 'REJECTED') {
+                    $loan->update([
+                        'status' => 'REJECTED',
+                        'note'   => $r->note,
+                    ]);
+                    $loan->installments()->delete();
+                } else {
+                    $loan->update([
+                        'status' => 'APPROVED_BENDAHARA',
+                        'note'   => $r->note,
+                        'approved_by_bendahara_at' => now(),
+                    ]);
+                }
+            }
+
+            // ================= KETUA =================
+            elseif ($user->role === 'KETUA') {
+
+                if ($loan->status !== 'APPROVED_BENDAHARA') {
+                    throw new \Exception('Belum disetujui Bendahara.');
+                }
+
+                if ($r->status === 'REJECTED') {
+                    $loan->update([
+                        'status' => 'REJECTED',
+                        'note'   => $r->note,
+                    ]);
+                    $loan->installments()->delete();
+                } else {
+                    $loan->update([
+                        'status' => 'APPROVED',
+                        'note'   => $r->note ?: 'Pinjaman disetujui oleh Ketua.',
+                        'approved_at' => now(),
+                        'approved_by_ketua_at' => now(),
+                    ]);
+                }
+            } else {
+                throw new \Exception('Unauthorized');
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | NOTIFIKASI (ANTI DOBEL)
+            |--------------------------------------------------------------------------
+            */
+            $notified = false;
+
+            if ($oldStatus !== $loan->status) {
+
+                // ke Ketua (setelah Bendahara approve)
+                if (!$notified && $loan->status === 'APPROVED_BENDAHARA') {
+                    ModelUser::where('role', 'KETUA')->each(function ($ketua) use ($loan, $oldStatus) {
+                        $ketua->notify(
+                            new LoanStatusChanged($loan, $oldStatus, $loan->status)
+                        );
+                    });
+                    $notified = true;
+                }
+
+                // ke Anggota (final)
+                if (
+                    !$notified &&
+                    in_array($loan->status, ['APPROVED', 'REJECTED'])
+                ) {
+                    $loan->user->notify(
+                        new LoanStatusChanged($loan, $oldStatus, $loan->status)
+                    );
+                    $notified = true;
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Status pinjaman diperbarui.',
+                'status'  => $loan->status
+            ]);
+
+        } catch (\Throwable $e) {
             DB::rollBack();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Pinjaman sudah diproses sebelumnya.'
+                'message' => $e->getMessage()
             ], 400);
         }
-
-        // ===============================
-        // NOTE DEFAULT JIKA APPROVED
-        // ===============================
-        $defaultApproveNote =
-            'Selamat, pinjaman Anda disetujui. ' .
-            'Selanjutnya Anda dapat melakukan pembayaran cicilan sesuai kesepakatan RAT. ' .
-            'Semoga uang yang diterima membawa keberkahan.';
-
-        // ===============================
-        // TENTUKAN NOTE
-        // ===============================
-        $note = $r->status === 'APPROVED'
-            ? ($r->note ?: $defaultApproveNote)
-            : $r->note;
-
-        // ===============================
-        // UPDATE PINJAMAN
-        // ===============================
-        $loan->update([
-            'status'      => $r->status,
-            'note'        => $note,
-            'approved_at' => $r->status === 'APPROVED'
-                ? now()
-                : null,
-        ]);
-
-        // ===============================
-        // JIKA REJECT → HAPUS CICILAN
-        // ===============================
-        if ($r->status === 'REJECTED') {
-            $loan->installments()->delete();
-        }
-
-        DB::commit();
-
-        // ===============================
-        // RESPONSE
-        // ===============================
-        return response()->json([
-            'success' => true,
-            'message' => $r->status === 'APPROVED'
-                ? 'Pinjaman berhasil disetujui oleh Ketua.'
-                : 'Pinjaman ditolak dan data cicilan dihapus.',
-            'data' => [
-                'loan_id'     => $loan->id,
-                'user_id'     => $loan->user_id,
-                'amount'      => $loan->amount,
-                'term_months' => $loan->term_months,
-                'loan_type'   => $loan->loan_type,
-                'status'      => $loan->status,
-                'note'        => $loan->note,
-                'approved_at' => $loan->approved_at,
-            ]
-        ]);
-
-    } catch (\Throwable $e) {
-        DB::rollBack();
-
-        return response()->json([
-            'success' => false,
-            'message' => 'Gagal memproses persetujuan pinjaman.',
-            'error'   => $e->getMessage()
-        ], 500);
     }
-}
-
-
 }
