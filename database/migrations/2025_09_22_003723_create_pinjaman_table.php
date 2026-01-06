@@ -17,9 +17,12 @@ return new class extends Migration
             $table->bigInteger('amount');
             $table->integer('term_months');
             $table->dateTime('approved_at')->nullable();
+            $table->dateTime('approved_at')->nullable();
+            $table->dateTime('approved_by_bendahara_at')->nullable();
+            $table->dateTime('approved_by_ketua_at')->nullable();
             $table->text('note')->nullable();
             $table->enum('loan_type', ['REGULER','TALANGAN'])->default('REGULER');
-            $table->enum('status', ['PENDING','APPROVED','REJECTED','LUNAS'])->default('PENDING');
+            $table->enum('status', ['PENDING','APPROVED','APPROVED_BENDAHARA','REJECTED','LUNAS'])->default('PENDING');
             $table->timestamps();
         });
     }
