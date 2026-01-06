@@ -298,4 +298,26 @@ class PinjamanController extends Controller
             ], 400);
         }
     }
+
+    public function pendingCount(Request $r)
+    {
+        $user = $r->user();
+
+        if ($user->role === 'BENDAHARA') {
+            $count = ModelPinjaman::where('status', 'PENDING')->count();
+        } 
+        elseif ($user->role === 'KETUA') {
+            $count = ModelPinjaman::where('status', 'APPROVED_BENDAHARA')->count();
+        } 
+        else {
+            $count = 0;
+        }
+
+        return response()->json([
+            'success' => true,
+            'role'    => $user->role,
+            'count'   => $count
+        ]);
+    }
+
 }

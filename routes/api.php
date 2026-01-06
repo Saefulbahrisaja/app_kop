@@ -128,13 +128,43 @@ Route::middleware('auth:sanctum')->group(function () {
     */
     Route::get('/notifications', function (Request $r) {
         return response()->json([
-            'count' => $r->user()->unreadNotifications->count(),
-            'data'  => $r->user()->unreadNotifications->map(fn ($n) => [
-                'id'         => $n->id,
-                'message'    => $n->data['message'] ?? '-',
-                'loan_id'    => $n->data['loan_id'] ?? null,
-                'created_at' => $n->created_at->diffForHumans(),
-            ]),
+            'count_unread' => $r->user()->unreadNotifications()->count(),
+            'data' => $r->user()->notifications()->latest()->take(50)->get()->map(function ($n) {
+                return [
+                    'id'         => $n->id,
+                    'message'    => $n->data['message'],
+                    'loan_id'    => $n->data['loan_id'] ?? null,
+                    'read_at'    => $n->read_at,
+                    'is_read'    => $n->read_at !== null,
+                    'created_at' => $n->created_at->diffForHumans(),
+                ];
+            })
         ]);
     });
+
+
+    Route::post('/notifications/{id}/read', function (Request $r, $id) {
+        $notification = $r->user()
+            ->notifications()
+            ->where('id', $id)
+            ->firstOrFail();
+
+        $notification->markAsRead();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Notifikasi ditandai sudah dibaca'
+        ]);
+    });
+
+    Route::post('/notifications/read-all', function (Request $r) {
+        $r->user()->unreadNotifications->markAsRead();
+        return response()->json([
+            'success' => true,
+            'message' => 'Semua notifikasi ditandai sudah dibaca'
+        ]);
+    });
+
+    Route::get('/loan/pending-count', [PinjamanController::class, 'pendingCount']);
+
 });
