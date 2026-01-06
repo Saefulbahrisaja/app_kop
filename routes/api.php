@@ -9,26 +9,11 @@ use App\Http\Controllers\CicilanController;
 use App\Http\Controllers\BendaharaController;
 use App\Http\Controllers\LpjController;
 
-/*
-|--------------------------------------------------------------------------
-| AUTH
-|--------------------------------------------------------------------------
-*/
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login',    [AuthController::class, 'login']);
 
-/*
-|--------------------------------------------------------------------------
-| AUTHENTICATED
-|--------------------------------------------------------------------------
-*/
 Route::middleware('auth:sanctum')->group(function () {
 
-    /*
-    |--------------------------------------------------------------------------
-    | MEMBER
-    |--------------------------------------------------------------------------
-    */
     Route::middleware('role:MEMBER')->group(function () {
 
         // ===== SIMPANAN =====
@@ -66,11 +51,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/bulk',                     [CicilanController::class, 'bulkPayment']);
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | BENDAHARA
-    |--------------------------------------------------------------------------
-    */
     Route::middleware('role:BENDAHARA')->group(function () {
 
         // ===== VERIFIKASI CICILAN =====
@@ -124,7 +104,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:KETUA')->group(function () {
         Route::post('/loans/{loan}/approve', [PinjamanController::class, 'approveLoan']);
        
-   
     });
 
 });

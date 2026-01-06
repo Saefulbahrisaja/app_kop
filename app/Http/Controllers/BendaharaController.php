@@ -89,21 +89,27 @@ public function grafikSisaPiutang(PiutangService $piutang)
             ]);
 
         // CICILAN
+       
         $tunggakanCicilan = ModelCicilan::whereNull('paid_at')
-            ->whereBetween('due_date', [$start, $end])
+            ->whereDate('due_date', '<', now()) // 🔑 HANYA YANG TELAT
             ->whereHas('loan.user')
-            ->with(['loan:id,user_id,loan_type,term_months,status','loan.user:id,full_name'])
+            ->with([
+                'loan:id,user_id,loan_type,term_months,status',
+                'loan.user:id,full_name'
+            ])
             ->get()
-            ->map(fn($c) => [
-                'anggota_id' => $c->loan->user->id,
-                'nama' => $c->loan->user->full_name,
-                'jenis' => 'CICILAN_PINJAMAN',
-                'cicilan' => [
-                    'nominal' => $c->amount,
-                    'jatuh_tempo' => $c->due_date->format('Y-m-d'),
-                    'hari_telat' => now()->diffInDays($c->due_date, false) * -1
-                ]
-            ]);
+            ->map(function ($c) {
+                return [
+                    'anggota_id' => $c->loan->user->id,
+                    'nama'       => $c->loan->user->full_name,
+                    'jenis'      => 'CICILAN_PINJAMAN',
+                    'cicilan'    => [
+                        'nominal'     => (float) $c->amount,
+                        'jatuh_tempo' => $c->due_date->format('Y-m-d'),
+                        'hari_telat'  => $c->due_date->diffInDays(now()), // ✅ SELALU POSITIF
+                    ]
+                ];
+            });
 
         return response()->json([
             'periode' => $start->format('Y-m'),
