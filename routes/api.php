@@ -9,6 +9,7 @@ use App\Http\Controllers\SimpananController;
 use App\Http\Controllers\CicilanController;
 use App\Http\Controllers\BendaharaController;
 use App\Http\Controllers\LpjController;
+use App\Http\Controllers\PendapatanController;
 
 /*
 |--------------------------------------------------------------------------
@@ -60,6 +61,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/loans',      [PinjamanController::class, 'index']);
         Route::post('/loans',     [PinjamanController::class, 'store']);
         Route::get('/loan/limit', [PinjamanController::class, 'loanLimit']);
+
+        Route::get('/pendapatan/can-input', [PendapatanController::class, 'canInput']);
+        Route::post('/pendapatan', [PendapatanController::class, 'store']);
 
         // ===== CICILAN =====
         Route::get('/loans/{loan}/installments', [CicilanController::class, 'index']);
