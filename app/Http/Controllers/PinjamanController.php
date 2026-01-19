@@ -102,65 +102,126 @@ class PinjamanController extends Controller
     |--------------------------------------------------------------------------
     */
     public function store(Request $r)
-    {
-        $r->validate([
-            'amount'      => 'required|numeric|min:1',
-            'term_months' => 'required|integer|min:1',
-            'loan_type'   => 'required|in:REGULER,TALANGAN'
-        ]);
+{
+    $r->validate([
+        'amount'      => 'required|numeric|min:1',
+        'term_months' => 'required|integer|min:1',
+        'loan_type'   => 'required|in:REGULER,TALANGAN',
+        'note'        => 'nullable|string|max:255',
+    ]);
 
-        $userId   = $r->user()->id;
-        $loanType = $r->loan_type;
+    $userId   = $r->user()->id;
+    $loanType = $r->loan_type;
 
-        $activeLoans = ModelPinjaman::where('user_id', $userId)
-            ->whereIn('status', ['PENDING', 'APPROVED', 'APPROVED_BENDAHARA'])
-            ->get();
+    // ================= AMBIL PINJAMAN AKTIF =================
+    $activeLoans = ModelPinjaman::where('user_id', $userId)
+        ->whereIn('status', ['PENDING', 'APPROVED', 'APPROVED_BENDAHARA'])
+        ->with(['installments'])
+        ->get();
 
-        if ($loanType === 'REGULER' && $activeLoans->isNotEmpty()) {
+    // ================= RULE 1: TALANGAN AKTIF BLOK SEMUA =================
+    if (
+        $activeLoans->where('loan_type', 'TALANGAN')->isNotEmpty()
+    ) {
+        return response()->json([
+            'error' => 'Masih ada pinjaman talangan aktif.'
+        ], 400);
+    }
+
+    // ================= RULE 2: REGULER MASIH PENDING =================
+    if (
+        $activeLoans
+            ->where('loan_type', 'REGULER')
+            ->where('status', 'PENDING')
+            ->isNotEmpty()
+    ) {
+        return response()->json([
+            'error' => 'Masih ada pengajuan pinjaman reguler yang belum diproses.'
+        ], 400);
+    }
+
+    // ================= RULE BARU: REGULER SEBELUMNYA HARUS LUNAS =================
+if ($loanType === 'REGULER') {
+
+    $regulerBelumLunas = $activeLoans
+        ->where('loan_type', 'REGULER')
+        ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA'])
+        ->filter(function ($loan) {
+            // masih ada cicilan yang belum dibayar
+            return $loan->installments
+                ->whereNull('paid_at')
+                ->isNotEmpty();
+        });
+
+    if ($regulerBelumLunas->isNotEmpty()) {
+        return response()->json([
+            'error' => 'Pinjaman reguler sebelumnya belum lunas.'
+        ], 400);
+    }
+}
+
+
+    // ================= RULE 3 & 4: KHUSUS TALANGAN =================
+    if ($loanType === 'TALANGAN') {
+
+        // Ambil REGULER APPROVED
+        $approvedReguler = $activeLoans
+            ->where('loan_type', 'REGULER')
+            ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA']);
+
+
+        // minimal 1 cicilan REGULER sudah dibayar
+        $hasPaidAtLeastOneInstallment = $approvedReguler->contains(function ($loan) {
+            return $loan->installments
+                ->whereNotNull('paid_at')
+                ->count() >= 1;
+        });
+
+        if (!$hasPaidAtLeastOneInstallment) {
             return response()->json([
-                'error' => 'Masih ada pinjaman aktif.'
+                'error' => 'Talangan hanya bisa diajukan setelah membayar minimal 1x cicilan reguler.'
             ], 400);
         }
 
-        if ($loanType === 'TALANGAN') {
-            if ($activeLoans->where('loan_type', 'TALANGAN')->isNotEmpty()) {
-                return response()->json([
-                    'error' => 'Masih ada pinjaman talangan.'
-                ], 400);
-            }
-            $r->merge(['term_months' => 1]);
-        }
+        // Talangan selalu 1x cicilan
+        $r->merge(['term_months' => 1]);
+    }
 
-        $loan = ModelPinjaman::create([
-            'user_id'     => $userId,
-            'amount'      => $r->amount,
-            'term_months' => $r->term_months,
-            'status'      => 'PENDING',
-            'loan_type'   => $loanType,
+    // ================= CREATE LOAN =================
+    $loan = ModelPinjaman::create([
+        'user_id'     => $userId,
+        'amount'      => $r->amount,
+        'term_months' => $r->term_months,
+        'status'      => 'PENDING',
+        'note'        => $r->note,
+        'loan_type'   => $loanType,
+    ]);
+
+    // ================= GENERATE CICILAN =================
+    $base  = floor($loan->amount / $loan->term_months / 10000) * 10000;
+    $total = 0;
+
+    for ($i = 1; $i <= $loan->term_months; $i++) {
+        $amount = ($i === $loan->term_months)
+            ? $loan->amount - $total
+            : $base;
+
+        $loan->installments()->create([
+            'amount'   => $amount,
+            'due_date' => now()->addMonths($i)
         ]);
 
-        // Generate cicilan
-        $base  = floor($loan->amount / $loan->term_months / 10000) * 10000;
-        $total = 0;
-
-        for ($i = 1; $i <= $loan->term_months; $i++) {
-            $amount = ($i === $loan->term_months)
-                ? $loan->amount - $total
-                : $base;
-
-            $loan->installments()->create([
-                'amount'   => $amount,
-                'due_date' => now()->addMonths($i)
-            ]);
-
-            $total += $amount;
-        }
-
-        return response()->json([
-            'success' => true,
-            'loan'    => $loan
-        ], 201);
+        $total += $amount;
     }
+
+    return response()->json([
+        'success' => true,
+        'loan'    => $loan
+    ], 201);
+}
+
+
+
 
     /*
     |--------------------------------------------------------------------------
