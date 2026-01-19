@@ -547,7 +547,7 @@ public function TagihanUser(
 
         $tagihan->push([
             'type'       => 'CICILAN',
-            'sub_type'   => 'PINJAMAN',
+            'sub_type'   => strtoupper($c->loan->loan_type ?? 'PINJAMAN'),
             'ref_id'     => $c->id,
             'due_date'   => $c->due_date
                 ? Carbon::parse($c->due_date)->format('Y-m-d')
