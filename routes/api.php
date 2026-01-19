@@ -46,7 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // ===== USER =====
         Route::get('/user', fn (Request $r) => $r->user());
         Route::post('/change-password', [AuthController::class, 'changePassword']);
-
+        Route::get('/info/dashboard', [BendaharaController::class, 'dashboard']);
         Route::get('/summary', function (Request $r) {
             return response()->json([
                 'total_savings' => $r->user()->savings()->sum('balance'),
