@@ -163,9 +163,9 @@ public function verifyUser(Request $r, $userId)
         /* ===============================
          * EMAIL
          * =============================== */
-        // Mail::to($user->email)->send(
-        //     new UserVerifiedMail($user)
-        // );
+        Mail::to($user->email)->send(
+            new UserVerifiedMail($user)
+        );
 
         return response()->json([
             'success'    => true,
