@@ -5,11 +5,14 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\ModelPinjaman;
 use App\Models\ModelCicilan;
+use App\Models\ModelPayment;
 use App\Services\LoanLimitService;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 use App\Models\ModelUser;
 use App\Notifications\LoanStatusChanged;
+use App\Services\KasKoperasiService;
+use App\Services\PiutangService;
 
 class PinjamanController extends Controller
 {
@@ -101,14 +104,21 @@ class PinjamanController extends Controller
     | AJUKAN PINJAMAN
     |--------------------------------------------------------------------------
     */
-    public function store(Request $r)
+    public function store(Request $r,KasKoperasiService $kas,
+    PiutangService $piutang)
     {
+        $SAFE_RATIO = 0.8;
         $r->validate([
-            'amount'      => 'required|numeric|min:1',
+            'amount'      => 'required|numeric|min:50000',
             'term_months' => 'required|integer|min:1',
             'loan_type'   => 'required|in:REGULER,TALANGAN',
             'note'        => 'nullable|string|max:255',
+        ],
+        [
+            'amount.min' => 'Minimal pengajuan pinjaman adalah Rp 50.000',
         ]);
+
+       
 
         $userId   = $r->user()->id;
         $loanType = $r->loan_type;
@@ -141,24 +151,24 @@ class PinjamanController extends Controller
         }
 
         // ================= RULE BARU: REGULER SEBELUMNYA HARUS LUNAS =================
-    if ($loanType === 'REGULER') {
+        if ($loanType === 'REGULER') {
 
-        $regulerBelumLunas = $activeLoans
-            ->where('loan_type', 'REGULER')
-            ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA'])
-            ->filter(function ($loan) {
-                // masih ada cicilan yang belum dibayar
-                return $loan->installments
-                    ->whereNull('paid_at')
-                    ->isNotEmpty();
-            });
+            $regulerBelumLunas = $activeLoans
+                ->where('loan_type', 'REGULER')
+                ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA'])
+                ->filter(function ($loan) {
+                    // masih ada cicilan yang belum dibayar
+                    return $loan->installments
+                        ->whereNull('paid_at')
+                        ->isNotEmpty();
+                });
 
-        if ($regulerBelumLunas->isNotEmpty()) {
-            return response()->json([
-                'error' => 'Pinjaman reguler sebelumnya belum lunas.'
-            ], 400);
+            if ($regulerBelumLunas->isNotEmpty()) {
+                return response()->json([
+                    'error' => 'Pinjaman reguler sebelumnya belum lunas.'
+                ], 400);
+            }
         }
-    }
 
 
         // ================= RULE 3 & 4: KHUSUS TALANGAN =================
@@ -187,6 +197,60 @@ class PinjamanController extends Controller
             $r->merge(['term_months' => 1]);
         }
 
+        // ================= RULE BARU: CEK SALDO KOPERASI =================
+
+        // ambil data kas & piutang (sama seperti dashboard)
+        $kasData     = $kas->kasSummary();
+        $piutangData = $piutang->summary();
+
+        $saldoKas = (float) ($kasData['saldo'] ?? 0);
+
+        
+        $SAFE_RATIO = 0.8;
+        $saldoMaksPinjaman = $saldoKas * $SAFE_RATIO;
+
+        if ($r->amount > $saldoMaksPinjaman) {
+            return response()->json([
+                'error' => 'Saldo koperasi tidak mencukupi. saldo koperasi saat ini. Rp '.$saldoMaksPinjaman,
+                'saldo_koperasi'        => $saldoKas,
+                'maks_pinjaman_diizinkan'=> $saldoMaksPinjaman,
+                'jumlah_diajukan'       => (float) $r->amount,
+            ], 400);
+        }
+
+        // ================= RULE BARU: BLOK JIKA SHU BELUM DIBAYAR =================
+        // ambil pinjaman terakhir user yang sudah pernah APPROVED
+        $lastApprovedLoan = ModelPinjaman::where('user_id', $userId)
+            ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA', 'LUNAS'])
+            ->orderByDesc('created_at')
+            ->first();
+
+        if ($lastApprovedLoan) {
+
+            // cek apakah SHU sudah pernah dibayarkan (APPROVED)
+            $shuPaid = ModelPayment::where('loan_id', $lastApprovedLoan->id)
+                ->whereNull('installment_id')
+                ->whereNull('simpanan_id')
+                ->where('note', 'like', '%SHU%')
+                ->where('status', 'APPROVED')
+                ->exists();
+
+            // cek apakah ada SHU PENDING
+            $shuPending = ModelPayment::where('loan_id', $lastApprovedLoan->id)
+                ->whereNull('installment_id')
+                ->whereNull('simpanan_id')
+                ->where('note', 'like', '%SHU%')
+                ->where('status', 'PENDING')
+                ->exists();
+
+            if (!$shuPaid || $shuPending) {
+                return response()->json([
+                    'error' => 'Pengajuan ditolak. SHU dari pinjaman sebelumnya belum diselesaikan.',
+                    'reason'=> 'SHU_UNPAID'
+                ], 400);
+            }
+        }
+
         // ================= CREATE LOAN =================
         $loan = ModelPinjaman::create([
             'user_id'     => $userId,
@@ -196,23 +260,6 @@ class PinjamanController extends Controller
             'note'        => $r->note,
             'loan_type'   => $loanType,
         ]);
-
-        // ================= GENERATE CICILAN =================
-        $base  = floor($loan->amount / $loan->term_months / 10000) * 10000;
-        $total = 0;
-
-        for ($i = 1; $i <= $loan->term_months; $i++) {
-            $amount = ($i === $loan->term_months)
-                ? $loan->amount - $total
-                : $base;
-
-            $loan->installments()->create([
-                'amount'   => $amount,
-                'due_date' => now()->addMonths($i)
-            ]);
-
-            $total += $amount;
-        }
 
         return response()->json([
             'success' => true,
@@ -306,6 +353,24 @@ class PinjamanController extends Controller
                         'approved_at' => now(),
                         'approved_by_ketua_at' => now(),
                     ]);
+
+                    // ================= GENERATE CICILAN =================
+                    $base  = floor($loan->amount / $loan->term_months / 10000) * 10000;
+                    $total = 0;
+
+                    for ($i = 1; $i <= $loan->term_months; $i++) {
+                        $amount = ($i === $loan->term_months)
+                            ? $loan->amount - $total
+                            : $base;
+
+                        $loan->installments()->create([
+                            'amount'   => $amount,
+                            'due_date' => now()->addMonths($i)
+                        ]);
+
+                        $total += $amount;
+                    }
+
                 }
             } else {
                 throw new \Exception('Unauthorized');

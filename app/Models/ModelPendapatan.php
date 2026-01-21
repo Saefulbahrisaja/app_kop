@@ -11,6 +11,7 @@ class ModelPendapatan extends Model
         'user_id',
         'amount',
         'periode',
+        'loan_id',
         'type',
         'note'
     ];

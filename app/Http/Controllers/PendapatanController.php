@@ -5,92 +5,101 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\ModelPendapatan;
 use App\Models\ModelPinjaman;
-use App\Models\ModelSimpanan;
+use App\Models\ModelPayment;
 
 class PendapatanController extends Controller
 {
-    // ===============================
-    // CEK BOLEH INPUT SHU
-    // ===============================
+    // ==========================================
+    // CEK APAKAH SHU MUNCUL (UNTUK UI)
+    // ==========================================
     public function canInput(Request $r)
-    {
-        $userId = $r->user()->id;
+{
+    $userId = $r->user()->id;
 
-        $hasActiveLoan = ModelPinjaman::where('user_id', $userId)
-            ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA'])
-            ->whereHas('installments', fn ($q) => $q->whereNull('paid_at'))
-            ->exists();
+    // ambil pinjaman terakhir user (baik masih jalan atau sudah lunas)
+    $loan = ModelPinjaman::where('user_id', $userId)
+        ->whereIn('status', ['APPROVED', 'LUNAS'])
+        ->orderByDesc('created_at')
+        ->first();
 
-        $hasActiveSimpanan = ModelSimpanan::where('user_id', $userId)
-            ->whereNull('paid_at')
-            ->exists();
-
+    if (!$loan) {
         return response()->json([
-            'can_input' => $hasActiveLoan || $hasActiveSimpanan
+            'can_input' => false
         ]);
     }
 
-    // ===============================
-    // SIMPAN SHU (INPUT USER)
-    // ===============================
+    // cek apakah SHU sudah dibayar (APPROVED)
+    $shuPaid = ModelPayment::where('loan_id', $loan->id)
+        ->whereNull('installment_id')
+        ->whereNull('simpanan_id')
+        ->where('note', 'like', '%SHU%')
+        ->where('status', 'APPROVED')
+        ->exists();
+
+    return response()->json([
+        'can_input' => !$shuPaid,
+        'loan_id'   => $loan->id
+    ]);
+}
+
+
     public function store(Request $r)
-    {
-        $r->validate([
-            'amount' => 'required|numeric|min:1',
-            'note'   => 'nullable|string|max:255'
-        ]);
+{
+    $r->validate([
+        'loan_id' => 'required|exists:pinjaman,id',
+        'amount'  => 'required|numeric|min:1',
+    ]);
 
-        $userId  = $r->user()->id;
-        $periode = now()->year;
+    $user = $r->user();
 
-        // ❌ CEGAT JIKA SUDAH LUNAS SEMUA
-        $canInput = $this->canInputPendapatan($userId);
-        if (!$canInput) {
-            return response()->json([
-                'error' => 'Semua kewajiban sudah lunas. Tidak dapat input SHU.'
-            ], 400);
-        }
+    // ================= VALIDASI PINJAMAN =================
+    $loan = ModelPinjaman::where('id', $r->loan_id)
+        ->where('user_id', $user->id)
+        ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA'])
+        ->whereHas('installments', fn ($q) => $q->whereNull('paid_at'))
+        ->first();
 
-        // ❌ CEGAH DOUBLE INPUT SHU TAHUN YANG SAMA
-        $exists = ModelPendapatan::where('user_id', $userId)
-            ->where('type', 'SHU')
-            ->where('periode', $periode)
-            ->exists();
-
-        if ($exists) {
-            return response()->json([
-                'error' => 'SHU periode ini sudah diinput.'
-            ], 400);
-        }
-
-        $data = ModelPendapatan::create([
-            'user_id' => $userId,
-            'amount'  => $r->amount,
-            'periode' => $periode,
-            'type'    => 'SHU',
-            'note'    => $r->note
-        ]);
-
+    if (!$loan) {
         return response()->json([
-            'success' => true,
-            'data'    => $data
-        ]);
+            'error' => 'Pinjaman sudah lunas atau tidak valid.'
+        ], 400);
     }
 
-    // ===============================
-    // HELPER INTERNAL
-    // ===============================
-    private function canInputPendapatan(int $userId): bool
-    {
-        $hasLoan = ModelPinjaman::where('user_id', $userId)
-            ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA'])
-            ->whereHas('installments', fn ($q) => $q->whereNull('paid_at'))
-            ->exists();
+    // ================= CEGAH DOUBLE SHU =================
+    $exists = ModelPendapatan::where('loan_id', $loan->id)
+        ->where('type', 'SHU')
+        ->exists();
 
-        $hasSimpanan = ModelSimpanan::where('user_id', $userId)
-            ->whereNull('paid_at')
-            ->exists();
-
-        return $hasLoan || $hasSimpanan;
+    if ($exists) {
+        return response()->json([
+            'error' => 'SHU untuk pinjaman ini sudah dibayarkan.'
+        ], 400);
     }
+
+    // ================= NOTE & PERIODE OTOMATIS =================
+    $note = sprintf(
+        'SHU %s dari pinjaman %s',
+        $user->full_name ?? $user->username,
+        strtoupper($loan->loan_type)
+    );
+
+    $periode = now(); // ⬅️ TANGGAL BAYAR SHU
+
+    // ================= SIMPAN =================
+    $data = ModelPendapatan::create([
+        'user_id' => $user->id,
+        'loan_id' => $loan->id,
+        'amount'  => $r->amount,
+        'type'    => 'SHU',
+        'periode' => $periode,
+        'note'    => $note
+    ]);
+
+    return response()->json([
+        'success' => true,
+        'data'    => $data
+    ]);
+}
+
+
 }

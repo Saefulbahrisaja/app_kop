@@ -24,6 +24,7 @@ class ModelUser extends Authenticatable implements AuthorizableContract
         'no_hp',
         'email',
         'no_anggota',
+        'status',
         'role'
     ];
 

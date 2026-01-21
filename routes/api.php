@@ -77,7 +77,6 @@ Route::middleware('auth:sanctum')->group(function () {
     |--------------------------------------------------------------------------
     */
     Route::middleware('role:BENDAHARA')->group(function () {
-
         // ===== VERIFIKASI CICILAN =====
         Route::prefix('payments')->group(function () {
             Route::get('/list',              [CicilanController::class, 'listPayments']);
@@ -85,7 +84,6 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/reject-by-proof',  [CicilanController::class, 'rejectByProof']);
             Route::post('/{payment}/reject', [CicilanController::class, 'rejectPayment']);
         });
-
         // ===== VERIFIKASI PENARIKAN =====
         Route::prefix('withdrawals')->group(function () {
             Route::post('/{withdrawal}/approve', [SimpananController::class, 'approveWithdrawal']);
@@ -109,7 +107,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // ===== DASHBOARD =====
         Route::get('/bendahara/dashboard', [BendaharaController::class, 'dashboard']);
-
         Route::prefix('bendahara')->group(function () {
             Route::get('/grafik-kas-tahunan',       [BendaharaController::class, 'grafikKasTahunan']);
             Route::get('/grafik/piutang',           [BendaharaController::class, 'grafikSisaPiutang']);
@@ -123,6 +120,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // ===== LPJ =====
         Route::get('/lpj',     [LpjController::class, 'lpj']);
         Route::get('/lpj/pdf', [LpjController::class, 'lpjPdf']);
+        //=====verifikasi user=====
+        Route::post('/users/{id}/verify',[AuthController::class, 'verifyUser']);
     });
 
     /*
