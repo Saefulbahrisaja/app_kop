@@ -172,30 +172,51 @@ class PinjamanController extends Controller
 
 
         // ================= RULE 3 & 4: KHUSUS TALANGAN =================
-        if ($loanType === 'TALANGAN') {
+       if ($loanType === 'TALANGAN') {
 
-            // Ambil REGULER APPROVED
-            $approvedReguler = $activeLoans
-                ->where('loan_type', 'REGULER')
-                ->whereIn('status', ['APPROVED', 'APPROVED_BENDAHARA']);
+    // 🔍 Ambil semua pinjaman user
+    $allLoans = $activeLoans;
 
+    // 1️⃣ CEK TALANGAN AKTIF
+    $hasActiveTalangan = $allLoans->contains(function ($loan) {
+        return $loan->loan_type === 'TALANGAN'
+            && $loan->status !== 'LUNAS';
+    });
 
-            // minimal 1 cicilan REGULER sudah dibayar
-            $hasPaidAtLeastOneInstallment = $approvedReguler->contains(function ($loan) {
-                return $loan->installments
-                    ->whereNotNull('paid_at')
-                    ->count() >= 1;
-            });
+    if ($hasActiveTalangan) {
+        return response()->json([
+            'error' => 'Talangan sebelumnya belum lunas.'
+        ], 400);
+    }
 
-            if (!$hasPaidAtLeastOneInstallment) {
-                return response()->json([
-                    'error' => 'Talangan hanya bisa diajukan setelah membayar minimal 1x cicilan reguler.'
-                ], 400);
-            }
+    // 2️⃣ AMBIL REGULER AKTIF
+    $activeReguler = $allLoans->filter(function ($loan) {
+        return $loan->loan_type === 'REGULER'
+            && in_array($loan->status, ['APPROVED', 'APPROVED_BENDAHARA']);
+    });
 
-            // Talangan selalu 1x cicilan
-            $r->merge(['term_months' => 1]);
+    // 3️⃣ JIKA ADA REGULER BELUM LUNAS → WAJIB 1x CICILAN
+    if ($activeReguler->isNotEmpty()) {
+
+        $hasPaidAtLeastOneInstallment = $activeReguler->contains(function ($loan) {
+            return $loan->installments
+                ->whereNotNull('paid_at')
+                ->count() >= 1;
+        });
+
+        if (!$hasPaidAtLeastOneInstallment) {
+            return response()->json([
+                'error' => 'Talangan hanya bisa diajukan setelah membayar minimal 1x cicilan reguler.'
+            ], 400);
         }
+    }
+
+    // 4️⃣ Talangan selalu 1x cicilan
+    $r->merge([
+        'term_months' => 1
+    ]);
+}
+
 
         // ================= RULE BARU: CEK SALDO KOPERASI =================
 
@@ -395,7 +416,13 @@ class PinjamanController extends Controller
                     $notified = true;
                 }
 
-                // ke Anggota (final)
+                if ($loan->status === 'APPROVED_BENDAHARA') {
+                    $loan->user->notify(
+                        new LoanStatusChanged($loan, $oldStatus, $loan->status)
+                    );
+                }
+
+               // ke Anggota (final)
                 if (
                     !$notified &&
                     in_array($loan->status, ['APPROVED', 'REJECTED'])

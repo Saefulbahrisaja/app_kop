@@ -11,6 +11,7 @@ use App\Mail\UserVerifiedMail;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class AuthController extends Controller
 {
@@ -217,15 +218,38 @@ public function login(Request $r)
     ]);
 }
 
+public function changePassword(Request $r)
+{
+    $r->validate([
+        'old_password' => 'required',
+        'new_password' => [
+            'required',
+            'min:8',
+            'regex:/[0-9]/',          // minimal 1 angka
+            'regex:/[^a-zA-Z0-9]/',   // minimal 1 karakter khusus
+        ],
+    ], [
+        'new_password.min' => 'Password baru minimal 8 karakter',
+        'new_password.regex' => 'Password harus mengandung angka dan karakter khusus',
+    ]);
 
-
-public function changePassword(Request $r){
-    $r->validate(['old_password'=>'required','new_password'=>'required|min:6']);
     $user = $r->user();
-    if(!Hash::check($r->old_password,$user->password)) 
-        return response()->json(['message'=>'Wrong current password'],403);
+
+    if (!Hash::check($r->old_password, $user->password)) {
+        return response()->json([
+            'message' => 'Password lama salah'
+        ], 403);
+    }
+
     $user->password = Hash::make($r->new_password);
     $user->save();
-    return response()->json(['message'=>'Password changed']);
+
+    // 🔥 AUTO LOGOUT SEMUA SESSION
+    $user->tokens()->delete();
+
+    return response()->json([
+        'message' => 'Password berhasil diubah, silakan login kembali'
+    ]);
 }
+
 }

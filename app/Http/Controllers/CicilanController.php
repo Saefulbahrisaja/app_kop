@@ -15,6 +15,8 @@ use Illuminate\Support\Facades\Log;
 use Intervention\Image\ImageManager;
 use Intervention\Image\Drivers\Gd\Driver;
 use Illuminate\Support\Str;
+use App\Notifications\PaymentApproved;
+use App\Models\ModelUser;
 
 
 
@@ -332,7 +334,7 @@ public function approveByProof(Request $r)
     DB::beginTransaction();
 
     try {
-        // 🔑 Ambil semua payment pending dengan proof ini
+
         $payments = ModelPayment::where('proof', $proof)
             ->where('status', 'PENDING')
             ->get();
@@ -353,6 +355,8 @@ public function approveByProof(Request $r)
                 'approved_at' => now(),
             ]);
 
+            $user = ModelUser::find($p->user_id);
+
             // ================= SIMPANAN =================
             if ($p->simpanan_id) {
                 $simpanan = ModelSimpanan::find($p->simpanan_id);
@@ -363,6 +367,16 @@ public function approveByProof(Request $r)
                         'paid_at'     => now(),
                         'approved_at' => now(),
                     ]);
+                }
+
+                // 🔔 NOTIF SIMPANAN
+                if ($user) {
+                    $user->notify(new PaymentApproved([
+                        'type'        => 'PAYMENT_APPROVED',
+                        'subtype'     => 'SIMPANAN',
+                        'simpanan_id' => $p->simpanan_id,
+                        'message'     => 'Setoran simpanan Anda telah disetujui',
+                    ]));
                 }
             }
 
@@ -376,7 +390,6 @@ public function approveByProof(Request $r)
                     ]);
                 }
 
-                // ===== CEK PINJAMAN =====
                 if ($cicilan && $cicilan->loan) {
                     $loan = $cicilan->loan;
 
@@ -386,6 +399,16 @@ public function approveByProof(Request $r)
 
                     if ($sisa === 0) {
                         $loan->update(['status' => 'LUNAS']);
+                    }
+
+                    // 🔔 NOTIF CICILAN
+                    if ($user) {
+                        $user->notify(new PaymentApproved([
+                            'type'    => 'PAYMENT_APPROVED',
+                            'subtype' => 'CICILAN',
+                            'loan_id' => $loan->id,
+                            'message' => 'Cicilan pinjaman Anda telah disetujui',
+                        ]));
                     }
                 }
             }
@@ -398,7 +421,6 @@ public function approveByProof(Request $r)
 
             if ($isSHU) {
 
-                // ❌ Cegah SHU dobel
                 $exists = \App\Models\ModelPendapatan::where('loan_id', $p->loan_id)
                     ->where('type', 'SHU')
                     ->exists();
@@ -413,6 +435,16 @@ public function approveByProof(Request $r)
                         'note'    => $p->note,
                     ]);
                 }
+
+                // 🔔 NOTIF SHU
+                if ($user) {
+                    $user->notify(new PaymentApproved([
+                        'type'    => 'PAYMENT_APPROVED',
+                        'subtype' => 'SHU',
+                        'loan_id' => $p->loan_id,
+                        'message' => 'Pembayaran SHU Anda telah disetujui',
+                    ]));
+                }
             }
         }
 
@@ -425,6 +457,7 @@ public function approveByProof(Request $r)
         ]);
 
     } catch (\Throwable $e) {
+
         DB::rollBack();
         Log::error('APPROVE BY PROOF ERROR', [
             'proof' => $proof,
@@ -438,6 +471,7 @@ public function approveByProof(Request $r)
         ], 500);
     }
 }
+
 
 
 public function rejectByProof(Request $r)

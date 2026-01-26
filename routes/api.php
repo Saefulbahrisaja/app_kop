@@ -10,6 +10,7 @@ use App\Http\Controllers\CicilanController;
 use App\Http\Controllers\BendaharaController;
 use App\Http\Controllers\LpjController;
 use App\Http\Controllers\PendapatanController;
+use App\Http\Controllers\ForgotPasswordController;
 
 /*
 |--------------------------------------------------------------------------
@@ -18,6 +19,9 @@ use App\Http\Controllers\PendapatanController;
 */
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login',    [AuthController::class, 'login']);
+Route::post('/forgot-password', [ForgotPasswordController::class, 'request']);
+Route::post('/reset-password',  [ForgotPasswordController::class, 'reset']);
+
 
 /*
 |--------------------------------------------------------------------------
@@ -169,5 +173,21 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::get('/loan/pending-count', [PinjamanController::class, 'pendingCount']);
+
+    Route::get('/notifications/unread', function (Request $r) {
+    return $r->user()
+        ->unreadNotifications()
+        ->latest()
+        ->get()
+        ->map(function ($n) {
+            return [
+                'id'         => $n->id,
+                'message'    => $n->data['message'] ?? '',
+                'loan_id'    => $n->data['loan_id'] ?? null,
+                'created_at' => $n->created_at->toISOString(),
+            ];
+        });
+});
+
 
 });
