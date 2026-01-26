@@ -107,30 +107,47 @@ class SimpananController extends Controller
         ]);
     }
 
-   public function totalByType(Request $r)
-    {
-        $data = $r->user()->savings()
-            ->whereNotNull('paid_at')
-            ->whereNotNull('approved_at')
-            ->selectRaw('type, COALESCE(SUM(amount),0) as total')
-            ->groupBy('type')
-            ->get();
+public function totalByType(Request $r)
+{
+    $user = $r->user(); // ambil user login
 
-        // Cek apakah collection kosong
-        if ($data->isEmpty()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Data saldo belum tersedia',
-                'data'    => []
-            ], 200);
-        }
+    $data = $user->savings()
+        ->whereNotNull('paid_at')
+        ->whereNotNull('approved_at')
+        ->selectRaw('type, COALESCE(SUM(amount),0) as total')
+        ->groupBy('type')
+        ->get();
 
+    if ($data->isEmpty()) {
         return response()->json([
-            'success' => true,
-            'message' => 'Data berhasil diambil',
-            'data'    => $data
-        ]);
+            'success'    => false,
+            'message'    => 'Data saldo belum tersedia',
+            'no_anggota' => $user->no_anggota,
+            'data'       => []
+        ], 200);
     }
+
+    // ===============================
+    // TOTAL SELURUH SIMPANAN
+    // ===============================
+    $grandTotal = $data->sum('total');
+
+    $dataWithTotal = collect([
+        [
+            'type'  => 'TOTAL SIMPANAN',
+            'total' => $grandTotal
+        ]
+    ])->merge($data);
+
+    return response()->json([
+        'success'    => true,
+        'message'    => 'Data berhasil diambil',
+        'no_anggota' => $user->no_anggota, // ⬅️ TAMBAHAN
+        'data'       => $dataWithTotal->values()
+    ]);
+}
+
+
 
 
 

@@ -9,6 +9,8 @@ use App\Http\Controllers\SimpananController;
 use App\Http\Controllers\CicilanController;
 use App\Http\Controllers\BendaharaController;
 use App\Http\Controllers\LpjController;
+use App\Http\Controllers\PendapatanController;
+use App\Http\Controllers\ForgotPasswordController;
 
 /*
 |--------------------------------------------------------------------------
@@ -17,6 +19,9 @@ use App\Http\Controllers\LpjController;
 */
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login',    [AuthController::class, 'login']);
+Route::post('/forgot-password', [ForgotPasswordController::class, 'request']);
+Route::post('/reset-password',  [ForgotPasswordController::class, 'reset']);
+
 
 /*
 |--------------------------------------------------------------------------
@@ -61,6 +66,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/loans',     [PinjamanController::class, 'store']);
         Route::get('/loan/limit', [PinjamanController::class, 'loanLimit']);
 
+        Route::get('/pendapatan/can-input', [PendapatanController::class, 'canInput']);
+        Route::post('/pendapatan', [PendapatanController::class, 'store']);
+
         // ===== CICILAN =====
         Route::get('/loans/{loan}/installments', [CicilanController::class, 'index']);
         Route::get('/tagihan',                   [CicilanController::class, 'TagihanUser']);
@@ -73,7 +81,6 @@ Route::middleware('auth:sanctum')->group(function () {
     |--------------------------------------------------------------------------
     */
     Route::middleware('role:BENDAHARA')->group(function () {
-
         // ===== VERIFIKASI CICILAN =====
         Route::prefix('payments')->group(function () {
             Route::get('/list',              [CicilanController::class, 'listPayments']);
@@ -81,7 +88,6 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/reject-by-proof',  [CicilanController::class, 'rejectByProof']);
             Route::post('/{payment}/reject', [CicilanController::class, 'rejectPayment']);
         });
-
         // ===== VERIFIKASI PENARIKAN =====
         Route::prefix('withdrawals')->group(function () {
             Route::post('/{withdrawal}/approve', [SimpananController::class, 'approveWithdrawal']);
@@ -105,7 +111,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // ===== DASHBOARD =====
         Route::get('/bendahara/dashboard', [BendaharaController::class, 'dashboard']);
-
         Route::prefix('bendahara')->group(function () {
             Route::get('/grafik-kas-tahunan',       [BendaharaController::class, 'grafikKasTahunan']);
             Route::get('/grafik/piutang',           [BendaharaController::class, 'grafikSisaPiutang']);
@@ -119,6 +124,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // ===== LPJ =====
         Route::get('/lpj',     [LpjController::class, 'lpj']);
         Route::get('/lpj/pdf', [LpjController::class, 'lpjPdf']);
+        //=====verifikasi user=====
+        Route::post('/users/{id}/verify',[AuthController::class, 'verifyUser']);
     });
 
     /*
@@ -166,5 +173,21 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::get('/loan/pending-count', [PinjamanController::class, 'pendingCount']);
+
+    Route::get('/notifications/unread', function (Request $r) {
+    return $r->user()
+        ->unreadNotifications()
+        ->latest()
+        ->get()
+        ->map(function ($n) {
+            return [
+                'id'         => $n->id,
+                'message'    => $n->data['message'] ?? '',
+                'loan_id'    => $n->data['loan_id'] ?? null,
+                'created_at' => $n->created_at->toISOString(),
+            ];
+        });
+});
+
 
 });
