@@ -10,6 +10,7 @@ use App\Http\Controllers\CicilanController;
 use App\Http\Controllers\BendaharaController;
 use App\Http\Controllers\LpjController;
 use App\Http\Controllers\PendapatanController;
+use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\ForgotPasswordController;
 
 /*
@@ -17,6 +18,7 @@ use App\Http\Controllers\ForgotPasswordController;
 | AUTH
 |--------------------------------------------------------------------------
 */
+
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login',    [AuthController::class, 'login']);
 Route::post('/forgot-password', [ForgotPasswordController::class, 'request']);
@@ -49,7 +51,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         // ===== USER =====
-        Route::get('/user', fn (Request $r) => $r->user());
+        Route::get('/user', fn(Request $r) => $r->user());
         Route::post('/change-password', [AuthController::class, 'changePassword']);
         Route::get('/info/dashboard', [BendaharaController::class, 'dashboard']);
         Route::get('/summary', function (Request $r) {
@@ -90,13 +92,30 @@ Route::middleware('auth:sanctum')->group(function () {
         });
         // ===== VERIFIKASI PENARIKAN =====
         Route::prefix('withdrawals')->group(function () {
-            Route::post('/{withdrawal}/approve', [SimpananController::class, 'approveWithdrawal']);
-            Route::post('/{withdrawal}/reject',  [SimpananController::class, 'rejectWithdrawal']);
+            Route::post(
+                '/{withdrawal}/approve',
+                [SimpananController::class, 'approveWithdrawal']
+            );
+            Route::post(
+                '{withdrawal}/disburse',
+                [SimpananController::class, 'disburseWithdrawal']
+            );
+        });
+
+        Route::prefix('expenses')->group(function () {
+            Route::get('/', [ExpenseController::class, 'index']);
+            Route::post('/', [ExpenseController::class, 'store']);
+            Route::put('/{id}', [ExpenseController::class, 'update']);
+            Route::delete('/{id}', [ExpenseController::class, 'destroy']);
+            Route::get('/history', [ExpenseController::class, 'history']);
+            Route::get('/summary', [ExpenseController::class, 'summary']);
         });
 
         // ===== DATA ANGGOTA =====
         Route::get('/bendahara/anggota/{id}', [BendaharaController::class, 'detailAnggota']);
     });
+
+
 
     /*
     |--------------------------------------------------------------------------
@@ -104,6 +123,17 @@ Route::middleware('auth:sanctum')->group(function () {
     |--------------------------------------------------------------------------
     */
     Route::middleware('role:BENDAHARA,KETUA')->group(function () {
+
+        Route::prefix('withdrawals')->group(function () {
+            Route::get('/list', [SimpananController::class, 'withdrawalRequests']);
+            Route::get('/withdraw-info', [SimpananController::class, 'withdrawInfo']);
+            Route::post(
+                '/{withdrawal}/approve-ketua',
+                [SimpananController::class, 'approveWithdrawalKetua']
+            );
+            Route::post('/{withdrawal}/reject',  [SimpananController::class, 'rejectWithdrawal']);
+        });
+
 
         // ===== PINJAMAN =====
         Route::get('/loan/list',             [PinjamanController::class, 'listPengajuan']);
@@ -125,7 +155,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/lpj',     [LpjController::class, 'lpj']);
         Route::get('/lpj/pdf', [LpjController::class, 'lpjPdf']);
         //=====verifikasi user=====
-        Route::post('/users/{id}/verify',[AuthController::class, 'verifyUser']);
+        Route::post('/users/{id}/verify', [AuthController::class, 'verifyUser']);
     });
 
     /*
@@ -175,19 +205,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/loan/pending-count', [PinjamanController::class, 'pendingCount']);
 
     Route::get('/notifications/unread', function (Request $r) {
-    return $r->user()
-        ->unreadNotifications()
-        ->latest()
-        ->get()
-        ->map(function ($n) {
-            return [
-                'id'         => $n->id,
-                'message'    => $n->data['message'] ?? '',
-                'loan_id'    => $n->data['loan_id'] ?? null,
-                'created_at' => $n->created_at->toISOString(),
-            ];
-        });
-});
-
-
+        return $r->user()
+            ->unreadNotifications()
+            ->latest()
+            ->get()
+            ->map(function ($n) {
+                return [
+                    'id'         => $n->id,
+                    'message'    => $n->data['message'] ?? '',
+                    'loan_id'    => $n->data['loan_id'] ?? null,
+                    'created_at' => $n->created_at->toISOString(),
+                ];
+            });
+    });
 });

@@ -116,7 +116,7 @@ class CicilanController extends Controller
         });
 
         $result[] = [
-            'proof_url'  => asset('storage/' . $proof),
+            'proof_url' => $proof ? asset('public/'.$proof) : null,
             'proof_raw'  => $proof,
             'user' => [
                 'id'   => $first->user->id,
@@ -155,26 +155,43 @@ class CicilanController extends Controller
     // ================= PROOF =================
     $file = $r->file('proof');
     $ext  = strtolower($file->getClientOriginalExtension());
-
+    
+    $publicProofPath = public_path('proofs');
+    
+    // pastikan folder ada
+    if (!file_exists($publicProofPath)) {
+        mkdir($publicProofPath, 0755, true);
+    }
+    
     if ($ext === 'pdf') {
-        $proofPath = $file->store('proofs', 'public');
+    
+        $filename  = 'proof_'.Str::uuid().'.pdf';
+        $file->move($publicProofPath, $filename);
+    
+        // disimpan ke DB (RELATIF)
+        $proofPath = 'proofs/'.$filename;
+    
     } else {
+    
         $manager = new ImageManager(new Driver());
         $image   = $manager->read($file);
         $image->orient()->scaleDown(1080);
-
+    
         $image->text(
             "KOPERASI DOSEN UBSI\n".now()->format('Y-m-d H:i')."\n".$user->full_name,
             $image->width() - 20,
             $image->height() - 20,
             fn ($font) => $font->size(18)->align('right')->valign('bottom')
         );
-
+    
         $filename = 'proof_'.Str::uuid().'.jpg';
-        $image->toJpeg(75)->save(storage_path('app/public/proofs/'.$filename));
+    
+        // ⬅️ SIMPAN LANGSUNG KE public/proofs
+        $image->toJpeg(75)->save($publicProofPath.'/'.$filename);
+    
+        // simpan path relatif
         $proofPath = 'proofs/'.$filename;
     }
-
     DB::beginTransaction();
     try {
 
@@ -608,7 +625,7 @@ public function TagihanUser(
     $wajibs = ModelSimpanan::where('user_id', $userId)
     ->where('type', 'wajib')
     ->whereNull('paid_at')
-    ->whereDate('period', '<=', $now)
+    //->whereDate('period', '<=', $now)
     ->orderBy('period')
     ->get();
 
@@ -625,7 +642,7 @@ public function TagihanUser(
             ->where('mandatory', 1)
             ->where(function ($q) use ($year) {
                 $q->whereNull('periode')
-                ->orWhere('periode', '<=', $year);
+                  ->orWhere('periode', '<=', $year);
             })
             ->orderByDesc('periode')
             ->value('amount') ?? 0;

@@ -242,74 +242,200 @@ public function totalByType(Request $r)
 
     
      public function approveWithdrawal(SavingWithdrawal $withdrawal)
-    {
-        if ($withdrawal->status !== 'PENDING') {
-            return response()->json([
-                'message' => 'Pengajuan sudah diproses'
-            ], 422);
-        }
-
-        DB::transaction(function () use ($withdrawal) {
-
-            $user = $withdrawal->user;
-
-            $saldo = $user->savings()
-                ->where('type', $withdrawal->type)
-                ->sum('amount');
-
-            if ($saldo < $withdrawal->amount) {
-                throw new \Exception('Saldo tidak mencukupi');
+        {
+            if ($withdrawal->status != 'PENDING') {
+                return response()->json([
+                    'message' => 'Pengajuan sudah diproses'
+                ],422);
             }
 
-            $currentBalance = $user->savings()->sum('amount');
-
-            $user->savings()->create([
-                'type'          => $withdrawal->type,
-                'amount'        => -$withdrawal->amount, // ⬅️ POTONG SALDO
-                'period'        => null,
-                'balance_after' => $currentBalance - $withdrawal->amount
-            ]);
-
             $withdrawal->update([
-                'status' => 'APPROVED'
+                'status' => 'APPROVED_BENDAHARA'
             ]);
-        });
 
-        return response()->json([
-            'message' => 'Penarikan berhasil disetujui dan saldo telah dikurangi'
-        ]);
-    }
-
-    public function rejectWithdrawal(SavingWithdrawal $withdrawal)
-    {
-        if ($withdrawal->status !== 'PENDING') {
-            return response()->json(['message'=>'Pengajuan sudah diproses'],422);
+            return response()->json([
+                'success'=>true,
+                'message'=>'Pengajuan diteruskan ke Ketua'
+            ]);
         }
 
-        $withdrawal->update(['status'=>'REJECTED']);
-        return response()->json(['message'=>'Penarikan ditolak']);
-    }
+        public function approveWithdrawalKetua(SavingWithdrawal $withdrawal)
+        {
+            if ($withdrawal->status != 'APPROVED_BENDAHARA') {
+                return response()->json([
+                    'message'=>'Belum diverifikasi Bendahara'
+                ],422);
+            }
 
-    public function withdrawalHistory(Request $r)
-    {
-        $withdrawals = SavingWithdrawal::where('user_id', $r->user()->id)
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(function ($w) {
-                return [
-                    'id'        => $w->id,
-                    'type'      => $w->type,
-                    'amount'    => $w->amount,
-                    'status'    => $w->status,
-                    'date'      => $w->created_at->format('Y-m-d H:i'),
-                ];
+            $withdrawal->update([
+                'status'=>'APPROVED_KETUA'
+            ]);
+
+            return response()->json([
+                'success'=>true,
+                'message'=>'Disetujui Ketua, siap dicairkan Bendahara'
+            ]);
+        }
+
+        public function disburseWithdrawal(SavingWithdrawal $withdrawal)
+        {
+            if ($withdrawal->status != 'APPROVED_KETUA') {
+                return response()->json([
+                    'message'=>'Belum mendapat persetujuan Ketua'
+                ],422);
+            }
+
+            DB::transaction(function () use ($withdrawal){
+
+                $user = $withdrawal->user;
+
+                $saldo = $user->savings()
+                    ->where('type',$withdrawal->type)
+                    ->sum('amount');
+
+                if($saldo < $withdrawal->amount){
+                    throw new \Exception("Saldo tidak mencukupi");
+                }
+
+                $currentBalance = $user->savings()->sum('amount');
+
+                $user->savings()->create([
+                    'type'=>$withdrawal->type,
+                    'amount'=>-$withdrawal->amount,
+                    'period'=>null,
+                    'paid_at'=>now(),
+                    'approved_at'=>now(),
+                    'balance_after'=>$currentBalance-$withdrawal->amount
+                ]);
+
+                $withdrawal->update([
+                    'status'=>'PAID',
+                    'paid_at'=>now()
+                ]);
             });
 
-        return response()->json([
-            'data' => $withdrawals
+            return response()->json([
+                'success'=>true,
+                'message'=>'Dana berhasil dicairkan'
+            ]);
+        }
+
+            public function rejectWithdrawal(SavingWithdrawal $withdrawal)
+        {
+            if(in_array($withdrawal->status,['PAID','REJECTED'])){
+                return response()->json([
+                    'message'=>'Pengajuan sudah selesai diproses'
+                ],422);
+            }
+
+            $withdrawal->update([
+                'status'=>'REJECTED'
+            ]);
+
+            return response()->json([
+                'success'=>true,
+                'message'=>'Penarikan ditolak'
+            ]);
+        }
+
+public function withdrawalRequests(Request $r)
+{
+    $user = $r->user();
+
+    $query = SavingWithdrawal::with(
+        'user:id,full_name,no_anggota'
+    );
+
+    if($user->role == 'BENDAHARA'){
+
+        $query->whereIn('status',[
+            'PENDING',
+            'APPROVED_KETUA'
         ]);
+
+    }elseif($user->role == 'KETUA'){
+
+        $query->where('status','APPROVED_BENDAHARA');
+
     }
 
+    $data = $query->latest()->get()->map(function($w){
+
+        return [
+
+            'id'=>$w->id,
+
+            'anggota'=>[
+                'nama'=>$w->user->full_name,
+                'no_anggota'=>$w->user->no_anggota
+            ],
+
+            'type'=>$w->type,
+
+            'amount'=>(float)$w->amount,
+
+            'status'=>$w->status,
+
+            'tanggal'=>$w->created_at->format('d M Y H:i')
+        ];
+
+    });
+
+    return response()->json([
+        'success'=>true,
+        'data'=>$data
+    ]);
+}
+    public function withdrawalHistory(Request $r)
+{
+    $data = SavingWithdrawal::where('user_id',$r->user()->id)
+        ->latest()
+        ->get()
+        ->map(function($w){
+
+            return [
+
+                'id'=>$w->id,
+
+                'type'=>strtoupper($w->type),
+
+                'amount'=>(float)$w->amount,
+
+                'status'=>$w->status,
+
+                'status_text'=>match($w->status){
+                      'PENDING'              => 'Menunggu Bendahara',
+                      'APPROVED_BENDAHARA'   => 'Menunggu Ketua',
+                      'APPROVED_KETUA'       => 'Menunggu Pencairan',
+                      'PAID'                 => 'Dana Dicairkan',
+                      'REJECTED'             => 'Ditolak',
+                     default=>$w->status
+                },
+
+                'status_color'=>match($w->status){
+                    'PENDING'=>'#F59E0B',
+                    'APPROVED_BENDAHARA'=>'#F59E0B',
+                    'APPROVED_KETUA'=>'#F59E0B',
+                    'PAID'=>'#10B981',
+                    'REJECTED'=>'#EF4444',
+                    default=>'#64748B'
+                },
+
+                'created_at'=>$w->created_at->format('d M Y H:i'),
+
+                'approved_at'=>$w->updated_at
+                    ? $w->updated_at->format('d M Y H:i')
+                    : null,
+            ];
+
+        });
+
+    return response()->json([
+        'success'=>true,
+        'total'=>$data->count(),
+        'data'=>$data
+    ]);
+}
     
 
 

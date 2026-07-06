@@ -18,57 +18,93 @@ class BendaharaController extends Controller
      * DASHBOARD UTAMA
      * ======================
      */
-   public function dashboard(
-    KasKoperasiService $kas,
-    PiutangService $piutang,
-    SimpananService $simpanan,
-    StatusSaldoService $statusSaldoService
-) {
-    $kasData      = $kas->kasSummary();
-    $piutangData  = $piutang->summary();
-    $simpananData = $simpanan->summary();
+    public function dashboard(
+        KasKoperasiService $kas,
+        PiutangService $piutang,
+        SimpananService $simpanan,
+        StatusSaldoService $statusSaldoService
+    ) {
 
-    $saldo        = (float) ($kasData['saldo'] ?? 0);
-    $sisaPiutang  = (float) ($piutangData['sisa_piutang'] ?? 0);
+        $kasData = $kas->kasSummary();
 
-    // 🔑 hitung status saldo via service
-    $statusSaldo = $statusSaldoService->hitung(
-        $saldo,
-        $sisaPiutang
-    );
+        $kasAkuntansi = $kas->kasSummaryAkuntansi();
 
-    return response()->json([
-        'simpanan' => [
-            'pokok'    => $simpananData['pokok'] ?? 0,
-            'wajib'    => $simpananData['wajib'] ?? 0,
-            'manasuka' => $simpananData['manasuka'] ?? 0,
-        ],
+        $piutangData = $piutang->summary();
 
-        'kas' => [
-            'saldo'   => $saldo,
-            'inflow'  => $kasData['inflow'] ?? 0,
-            'outflow' => $kasData['outflow'] ?? 0,
-        ],
+        $simpananData = $simpanan->summary();
 
-        'piutang' => [
-            'total_pinjaman' => $piutangData['total_pinjaman'] ?? 0,
-            'terbayar'       => $piutangData['total_terbayar'] ?? 0,
-            'sisa'           => $sisaPiutang,
-        ],
+        $statusSaldo = $statusSaldoService->hitung(
 
-        // ✅ sekarang selalu ada
-        'status_saldo' => $statusSaldo,
-    ]);
-}
+            $kasAkuntansi['saldo_bersih'],
 
+            $piutangData['sisa_piutang']
 
-public function grafikSisaPiutang(PiutangService $piutang)
-{
-    return response()->json([
-        'data' => $piutang->grafikSisaPiutangBulanan(12)
-    ]);
-}
-   
+        );
+
+        return response()->json([
+
+            "simpanan" => [
+
+                "pokok"    => (float)($simpananData["pokok"] ?? 0),
+
+                "wajib"    => (float)($simpananData["wajib"] ?? 0),
+
+                "manasuka" => (float)($simpananData["manasuka"] ?? 0),
+
+            ],
+
+            "kas" => [
+
+                "saldo"       => $kasData["saldo"],
+
+                "inflow"      => $kasData["inflow"],
+
+                "outflow"     => $kasData["outflow"],
+
+                "pinjaman"    => $kasData["pinjaman"],
+
+                "pengeluaran" => $kasData["expense"],
+
+                "penarikan"   => $kasData["withdrawal"],
+
+            ],
+
+            "piutang" => [
+
+                "total_pinjaman" => (float)$piutangData["total_pinjaman"],
+
+                "terbayar"       => (float)$piutangData["total_terbayar"],
+
+                "sisa"           => (float)$piutangData["sisa_piutang"],
+
+            ],
+
+            "kas_akuntansi" => [
+
+                "saldo_kas"      => $kasAkuntansi["saldo_kas"],
+
+                "pendapatan_shu" => $kasAkuntansi["pendapatan_shu"],
+
+                "pengeluaran"    => $kasAkuntansi["pengeluaran"],
+
+                "penarikan"      => $kasAkuntansi["withdrawal"],
+
+                "saldo_bersih"   => $kasAkuntansi["saldo_bersih"]
+
+            ],
+
+            "status_saldo" => $statusSaldo
+
+        ]);
+    }
+
+    public function grafikSisaPiutang(PiutangService $piutang)
+    {
+        return response()->json([
+            'data' => $piutang->grafikSisaPiutangBulanan(12)
+        ]);
+    }
+
     public function tunggakan()
     {
         $start = Carbon::now()->startOfMonth();
@@ -78,8 +114,8 @@ public function grafikSisaPiutang(PiutangService $piutang)
         $tunggakanSimpanan = ModelUser::where('role', 'MEMBER')
             ->whereDoesntHave('savings', function ($q) use ($start) {
                 $q->where('type', 'wajib')
-                  ->where('period', $start)
-                  ->whereNotNull('approved_at');
+                    ->where('period', $start)
+                    ->whereNotNull('approved_at');
             })
             ->get(['id', 'full_name'])
             ->map(fn($u) => [
@@ -89,7 +125,7 @@ public function grafikSisaPiutang(PiutangService $piutang)
             ]);
 
         // CICILAN
-       
+
         $tunggakanCicilan = ModelCicilan::whereNull('paid_at')
             ->whereDate('due_date', '<', now()) // 🔑 HANYA YANG TELAT
             ->whereHas('loan.user')
@@ -132,14 +168,14 @@ public function grafikSisaPiutang(PiutangService $piutang)
      */
     public function saldoSimpanan()
     {
-        $data = ModelUser::where('role','MEMBER')
+        $data = ModelUser::where('role', 'MEMBER')
             ->with(['savings' => fn($q) => $q->whereNotNull('approved_at')])
             ->get()
             ->map(function ($u) {
 
-                $wajib = $u->savings->where('type','wajib')->sum('amount');
-                $manasuka = $u->savings->where('type','manasuka')->sum('amount');
-                $pokok = $u->savings->where('type','pokok')->sum('amount');
+                $wajib = $u->savings->where('type', 'wajib')->sum('amount');
+                $manasuka = $u->savings->where('type', 'manasuka')->sum('amount');
+                $pokok = $u->savings->where('type', 'pokok')->sum('amount');
 
                 return [
                     'anggota_id' => $u->id,
@@ -164,25 +200,47 @@ public function grafikSisaPiutang(PiutangService $piutang)
      * GRAFIK KAS TAHUNAN
      * ======================
      */
-    public function grafikKasTahunan(Request $request, KasKoperasiService $service)
-    {
-        $tahun = $request->get('tahun', now()->year);
-        return response()->json($service->grafikKasTahunan($tahun));
+    public function grafikKasTahunan(
+        Request $request,
+        KasKoperasiService $service
+    ) {
+
+        return response()->json(
+
+            $service->grafikKasTahunan(
+
+                $request->tahun ?? now()->year
+
+            )
+
+        );
     }
 
     public function grafikSisaPiutangPerAnggota(PiutangService $piutang)
-{
-    return response()->json([
-        'data' => $piutang->grafikSisaPiutangPerAnggota()
-    ]);
-}
+    {
+        return response()->json([
+            'data' => $piutang->grafikSisaPiutangPerAnggota()
+        ]);
+    }
 
-public function proyeksiPiutang(Request $request, PiutangService $piutang)
-{
-    $bulan = $request->get('bulan', 6); // default 6 bulan ke depan
+    public function proyeksiPiutang(Request $request, PiutangService $piutang)
+    {
+        $bulan = $request->get('bulan', 6); // default 6 bulan ke depan
 
-    return response()->json([
-        'data' => $piutang->proyeksiPiutangByDueDate($bulan)
-    ]);
-}
+        return response()->json([
+            'data' => $piutang->proyeksiPiutangByDueDate($bulan)
+        ]);
+    }
+
+    public function kasSummary(
+        KasKoperasiService $kas
+    ) {
+
+        return response()->json([
+
+            "success" => true,
+            "data" => $kas->kasSummary()
+
+        ]);
+    }
 }
