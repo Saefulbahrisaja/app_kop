@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Login Koperasi</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+
+  <div class="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md">
+    <h2 class="text-2xl font-bold text-center text-gray-700 mb-6">
+      Login Koperasi
+    </h2>
+
+    <form id="loginForm" class="space-y-4">
+      
+      <div>
+        <label class="text-sm text-gray-600">Username</label>
+        <input id="username" type="text"
+          class="w-full mt-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+          required>
+      </div>
+
+      <div>
+        <label class="text-sm text-gray-600">Password</label>
+        <input id="password" type="password"
+          class="w-full mt-1 px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+          required>
+      </div>
+
+      <button id="btnLogin" type="submit"
+        class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">
+        Login
+      </button>
+
+      <p id="message" class="text-center text-sm"></p>
+    </form>
+  </div>
+
+  <!-- MODULE JS -->
+  <script type="module" src="./js/login.js"></script>
+
+</body>
+</html>

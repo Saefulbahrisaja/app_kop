@@ -7,29 +7,269 @@ use Illuminate\Support\Facades\DB;
 
 class KasKoperasiService
 {
-    /**
-     * ============================
-     * SALDO AWAL KOPERASI
-     * ============================
-     */
-    public function saldoAwal($startDate)
+
+    public function saldoAwal($tanggal)
     {
+        // ==========================
+        // INFLOW
+        // ==========================
+
         $simpanan = DB::table('simpanan')
             ->whereNotNull('paid_at')
-            ->whereDate('paid_at', '<', $startDate)
+            ->whereDate('paid_at', '<', $tanggal)
             ->sum('amount');
 
         $cicilan = DB::table('cicilan')
             ->whereNotNull('paid_at')
-            ->whereDate('paid_at', '<', $startDate)
+            ->whereDate('paid_at', '<', $tanggal)
             ->sum('amount');
+
+        $pendapatan = DB::table('pendapatan')
+            ->whereDate('periode', '<', $tanggal)
+            ->sum('amount');
+
+        // ==========================
+        // OUTFLOW
+        // ==========================
 
         $pinjaman = DB::table('pinjaman')
             ->whereNotNull('approved_at')
-            ->whereDate('approved_at', '<', $startDate)
+            ->whereDate('approved_at', '<', $tanggal)
             ->sum('amount');
 
-        return ($simpanan + $cicilan) - $pinjaman;
+        $expense = DB::table('expense')
+            ->whereDate('approved_at', '<', $tanggal)
+            ->sum('amount');
+
+        $withdrawal = DB::table('tarik_simpanan')
+            ->where('status', 'DISBURSED')
+            ->whereDate('updated_at', '<', $tanggal)
+            ->sum('amount');
+
+        return (float) (
+
+            ($simpanan + $cicilan + $pendapatan)
+
+            -
+
+            ($pinjaman + $expense + $withdrawal)
+
+        );
+    }
+    private function totalSimpanan()
+    {
+        return (float) DB::table('simpanan')
+            ->whereNotNull('paid_at')
+            ->sum('amount');
+    }
+
+    private function totalCicilan()
+    {
+        return (float) DB::table('cicilan')
+            ->whereNotNull('paid_at')
+            ->sum('amount');
+    }
+    private function totalPinjaman()
+    {
+        return (float) DB::table('pinjaman')
+            ->whereNotNull('approved_at')
+            ->sum('amount');
+    }
+
+    private function totalExpense()
+    {
+        return (float) DB::table('expense')
+            ->sum('amount');
+    }
+    private function totalWithdrawal()
+    {
+        return (float) DB::table('tarik_simpanan')
+            ->where('status', 'PAID')
+            ->sum('amount');
+    }
+
+    private function totalPendapatan()
+    {
+        return (float) DB::table('pendapatan')
+            ->sum('amount');
+    }
+
+    public function kasSummary()
+    {
+        $simpanan    = $this->totalSimpanan();
+        $cicilan     = $this->totalCicilan();
+        $pendapatan  = $this->totalPendapatan();
+
+        $pinjaman    = $this->totalPinjaman();
+        $expense     = $this->totalExpense();
+        $withdrawal  = $this->totalWithdrawal();
+
+        // Semua pemasukan
+        $inflow = $simpanan + $cicilan + $pendapatan;
+
+        // Semua pengeluaran
+        $outflow = $pinjaman + $expense + $withdrawal;
+
+        // Saldo kas
+        $saldo = $inflow - $outflow;
+
+        return [
+
+            "simpanan"    => $simpanan,
+            "cicilan"     => $cicilan,
+            "pendapatan"  => $pendapatan,
+            "pinjaman"    => $pinjaman,
+            "expense"     => $expense,
+            "withdrawal"  => $withdrawal,
+            "inflow"      => $inflow,
+            "outflow"     => $outflow,
+            "saldo"       => $saldo
+
+        ];
+    }
+    public function statusKas()
+    {
+        $saldo = $this->kasSummary()['saldo'];
+        if ($saldo < 0) {
+            return [
+                "saldo" => $saldo,
+                "status" => "KRITIS",
+                "color" => "RED"
+            ];
+        }
+
+        if ($saldo <= 10000000) {
+            return [
+                "saldo" => $saldo,
+                "status" => "WASPADA",
+                "color" => "ORANGE"
+            ];
+        }
+        return [
+            "saldo" => $saldo,
+            "status" => "AMAN",
+            "color" => "GREEN"
+
+        ];
+    }
+
+    public function kasSummaryAkuntansi()
+    {
+        $kas = $this->kasSummary();
+
+        return [
+            "saldo_kas"      => $kas["saldo"],
+            "pendapatan_shu" => $kas["pendapatan"],
+            "pengeluaran"    => $kas["expense"],
+            "withdrawal"     => $kas["withdrawal"],
+            "saldo_bersih"   => $kas["saldo"]
+
+        ];
+    }
+
+    private function inflowPeriode(Carbon $start, Carbon $end)
+    {
+        $simpanan = DB::table('simpanan')
+            ->selectRaw("
+                DATE_FORMAT(paid_at,'%Y-%m') periode,
+                SUM(amount) total
+            ")
+            ->whereNotNull('paid_at')
+            ->whereBetween('paid_at', [$start, $end])
+            ->groupBy('periode');
+
+        $cicilan = DB::table('cicilan')
+            ->selectRaw("
+                DATE_FORMAT(paid_at,'%Y-%m') periode,
+                SUM(amount) total
+            ")
+            ->whereNotNull('paid_at')
+            ->whereBetween('paid_at', [$start, $end])
+            ->groupBy('periode');
+
+        $pendapatan = DB::table('pendapatan')
+            ->selectRaw("
+                DATE_FORMAT(periode,'%Y-%m') periode,
+                SUM(amount) total
+            ")
+            ->whereBetween('periode', [$start, $end])
+            ->groupBy('periode');
+
+        return DB::query()
+            ->fromSub(
+
+                $simpanan
+                    ->unionAll($cicilan)
+                    ->unionAll($pendapatan),
+
+                'x'
+
+            )
+
+            ->selectRaw("
+                periode,
+                SUM(total) inflow
+            ")
+
+            ->groupBy('periode')
+
+            ->pluck('inflow', 'periode');
+    }
+
+    private function outflowPeriode(Carbon $start, Carbon $end)
+    {
+
+        $pinjaman = DB::table('pinjaman')
+            ->selectRaw("
+            DATE_FORMAT(approved_at,'%Y-%m') periode,
+            SUM(amount) total
+        ")
+            ->whereNotNull('approved_at')
+            ->whereBetween('approved_at', [$start, $end])
+            ->groupBy('periode');
+
+        $expense = DB::table('expense')
+            ->selectRaw("
+            DATE_FORMAT(approved_at,'%Y-%m') periode,
+            SUM(amount) total
+        ")
+            ->whereBetween('approved_at', [$start, $end])
+            ->groupBy('periode');
+
+        $withdrawal = DB::table('tarik_simpanan')
+            ->selectRaw("
+            DATE_FORMAT(updated_at,'%Y-%m') periode,
+            SUM(amount) total
+        ")
+            ->where('status', 'PAID')
+            ->whereBetween('updated_at', [$start, $end])
+            ->groupBy('periode');
+
+        return DB::query()
+
+            ->fromSub(
+
+                $pinjaman
+                    ->unionAll($expense)
+                    ->unionAll($withdrawal),
+                'x'
+
+            )
+
+            ->selectRaw("
+            periode,
+            SUM(total) outflow
+        ")
+
+            ->groupBy('periode')
+
+            ->pluck('outflow', 'periode');
+    }
+
+
+    public function saldoAkhir()
+    {
+        return $this->kasSummary()['saldo'];
     }
 
 
@@ -40,35 +280,17 @@ class KasKoperasiService
      */
     public function inflowBulanan($bulan = 12)
     {
-    $start = Carbon::now()->subMonths($bulan)->startOfMonth();
+        $start = now()
+            ->subMonths($bulan - 1)
+            ->startOfMonth();
 
-    $simpanan = DB::table('simpanan')
-        ->selectRaw("
-            DATE_FORMAT(paid_at, '%Y-%m') as periode,
-            SUM(amount) as total
-        ")
-        ->whereNotNull('paid_at')
-        ->whereDate('paid_at', '>=', $start)
-        ->groupBy('periode');
+        $end = now()->endOfMonth();
 
-    $cicilan = DB::table('cicilan')
-        ->join('pinjaman', 'pinjaman.id', '=', 'cicilan.loan_id')
-        ->selectRaw("
-            DATE_FORMAT(paid_at, '%Y-%m') as periode,
-            SUM(amount) as total
-        ")
-        ->whereNotNull('cicilan.paid_at')
-        ->whereNotNull('pinjaman.approved_at')
-        ->whereDate('cicilan.paid_at', '>=', $start)
-        ->groupBy('periode');
-
-    return DB::query()
-        ->fromSub($simpanan->unionAll($cicilan), 'inflow')
-        ->selectRaw("periode, SUM(total) as inflow")
-        ->groupBy('periode')
-        ->orderBy('periode')
-        ->get();
-}
+        return $this->inflowPeriode(
+            $start,
+            $end
+        );
+    }
 
 
     /**
@@ -77,22 +299,18 @@ class KasKoperasiService
      * ============================
      */
     public function outflowBulanan($bulan = 12)
-{
-    $start = Carbon::now()->subMonths($bulan)->startOfMonth();
+    {
+        $start = now()
+            ->subMonths($bulan - 1)
+            ->startOfMonth();
 
-    return DB::table('pinjaman')
-        ->selectRaw("
-            DATE_FORMAT(approved_at, '%Y-%m') as periode,
-            SUM(amount) as outflow
-        ")
-        ->whereNotNull('approved_at')
-        ->whereDate('approved_at', '>=', $start)
-        ->groupBy('periode')
-        ->orderBy('periode')
-        ->get();
-}
+        $end = now()->endOfMonth();
 
-
+        return $this->outflowPeriode(
+            $start,
+            $end
+        );
+    }
     /**
      * ============================
      * GABUNG SEMUA UNTUK GRAFIK
@@ -100,209 +318,151 @@ class KasKoperasiService
      */
     public function grafikKas($bulan = 12)
     {
-        $start = Carbon::now()->subMonths($bulan)->startOfMonth();
 
-        $saldoAwal = $this->saldoAwal($start);
+        $start = now()
+            ->subMonths($bulan - 1)
+            ->startOfMonth();
 
-        $inflow  = $this->inflowBulanan($bulan)->keyBy('periode');
-        $outflow = $this->outflowBulanan($bulan)->keyBy('periode');
+        $end = now()->endOfMonth();
 
-        $periode = collect($inflow->keys())
-            ->merge($outflow->keys())
-            ->unique()
-            ->sort()
-            ->values();
+        $saldo = $this->saldoAwal($start);
 
-        $saldo = $saldoAwal;
-        $result = [];
+        $inflow = $this->inflowPeriode(
+            $start,
+            $end
+        );
+
+        $outflow = $this->outflowPeriode(
+            $start,
+            $end
+        );
+
+        $periode = [];
+
+        $date = $start->copy();
+
+        while ($date <= $end) {
+
+            $periode[] = $date->format('Y-m');
+
+            $date->addMonth();
+        }
+
+        $hasil = [];
 
         foreach ($periode as $p) {
-            $in  = $inflow[$p]->inflow  ?? 0;
-            $out = $outflow[$p]->outflow ?? 0;
 
-            $saldo = $saldo + $in - $out;
+            $masuk = (float) ($inflow[$p] ?? 0);
 
-            $result[] = [
-                'periode' => $p,
-                'inflow'  => (float) $in,
-                'outflow' => (float) $out,
-                'saldo'   => (float) $saldo,
+            $keluar = (float) ($outflow[$p] ?? 0);
+
+            $saldo += $masuk - $keluar;
+
+            $hasil[] = [
+
+                "periode" => $p,
+
+                "inflow" => $masuk,
+
+                "outflow" => $keluar,
+
+                "saldo" => $saldo
+
             ];
         }
 
         return [
-            'saldo_awal' => $saldoAwal,
-            'data' => $result
+
+            "saldo_awal" => $this->saldoAwal($start),
+
+            "data" => $hasil
+
         ];
     }
 
-public function saldoAkhir()
-{
-    $simpanan = DB::table('simpanan')
-        ->whereNotNull('paid_at')
-        ->sum('amount');
+    public function grafikKasTahunan($tahun = null)
+    {
 
-    $cicilan = DB::table('cicilan')
-        ->join('pinjaman', 'pinjaman.id', '=', 'cicilan.loan_id')
-        ->whereNotNull('cicilan.paid_at')
-        ->whereNotNull('pinjaman.approved_at')
-        ->sum('cicilan.amount');
+        $tahun = $tahun ?? now()->year;
 
-    $pinjaman = DB::table('pinjaman')
-        ->whereNotNull('approved_at')
-        ->sum('amount');
+        $start = Carbon::create($tahun, 1, 1);
 
-    return (float)(($simpanan + $cicilan) - $pinjaman);
-}
+        $end = Carbon::create($tahun, 12, 31);
 
-public function grafikKasTahunan($tahun = null)
-{
-    $tahun = $tahun ?? Carbon::now()->year;
+        $saldo = $this->saldoAwal($start);
 
-    $start = Carbon::create($tahun, 1, 1)->startOfMonth();
-    $end   = Carbon::create($tahun, 12, 31)->endOfMonth();
+        $inflow = $this->inflowPeriode(
+            $start,
+            $end
+        );
 
-    // ======================
-    // SALDO AWAL (sebelum Jan)
-    // ======================
-    $saldoAwal = $this->saldoAwal($start);
+        $outflow = $this->outflowPeriode(
+            $start,
+            $end
+        );
 
-    // ======================
-    // INFLOW
-    // ======================
-    $simpanan = DB::table('simpanan')
-        ->selectRaw("
-            DATE_FORMAT(paid_at, '%Y-%m') as periode,
-            SUM(amount) as total
-        ")
-        ->whereBetween('paid_at', [$start, $end])
-        ->groupBy('periode');
+        $data = [];
 
-    $cicilan = DB::table('cicilan')
-        ->selectRaw("
-            DATE_FORMAT(paid_at, '%Y-%m') as periode,
-            SUM(amount) as total
-        ")
-        ->whereNotNull('paid_at')
-        ->whereBetween('paid_at', [$start, $end])
-        ->groupBy('periode');
+        for ($i = 1; $i <= 12; $i++) {
 
-    $inflow = DB::query()
-        ->fromSub($simpanan->unionAll($cicilan), 'inflow')
-        ->selectRaw("periode, SUM(total) as inflow")
-        ->groupBy('periode')
-        ->pluck('inflow', 'periode');
+            $periode = sprintf(
+                "%04d-%02d",
+                $tahun,
+                $i
+            );
 
-    // ======================
-    // OUTFLOW
-    // ======================
-    $outflow = DB::table('pinjaman')
-        ->selectRaw("
-            DATE_FORMAT(approved_at, '%Y-%m') as periode,
-            SUM(amount) as outflow
-        ")
-        ->whereBetween('approved_at', [$start, $end])
-        ->groupBy('periode')
-        ->pluck('outflow', 'periode');
+            $masuk = (float)($inflow[$periode] ?? 0);
 
-    // ======================
-    // BENTUK 12 BULAN PENUH
-    // ======================
-    $result = [];
-    $saldo = $saldoAwal;
+            $keluar = (float)($outflow[$periode] ?? 0);
 
-    for ($i = 0; $i < 12; $i++) {
+            $saldo += $masuk;
 
-        $periode = $start->copy()->addMonths($i)->format('Y-m');
+            $saldo -= $keluar;
 
-        $in  = (float) ($inflow[$periode]  ?? 0);
-        $out = (float) ($outflow[$periode] ?? 0);
+            $data[] = [
 
-        $saldo = $saldo + $in - $out;
+                "periode" => $periode,
+                "inflow" => $masuk,
+                "outflow" => $keluar,
+                "saldo" => $saldo
 
-        $result[] = [
-            'periode' => $periode,
-            'inflow'  => $in,
-            'outflow' => $out,
-            'saldo'   => $saldo,
+            ];
+        }
+
+        return [
+
+            "saldo_awal" => $this->saldoAwal($start),
+
+            "data" => $data
+
         ];
     }
 
-    return [
-        'saldo_awal' => (float) $saldoAwal,
-        'data'       => $result
-    ];
-}
+    public function saldoRealtime()
+    {
+        return $this->kasSummary();
+    }
 
-public function saldoRealtime()
-{
-    $simpanan = DB::table('simpanan')
-        ->whereNotNull('paid_at')
-        ->sum('amount');
+    public function statusSaldo($saldo)
+    {
+        if ($saldo < 0) {
+            return [
+                'saldo' => $saldo,
+                'status' => 'KRITIS',
+                'color' => 'RED',
+            ];
+        } elseif ($saldo <= 10000000) {
+            return [
+                'saldo' => $saldo,
+                'status' => 'WASPADA',
+                'color' => 'ORANGE',
+            ];
+        }
 
-    $cicilan = DB::table('cicilan')
-        ->whereNotNull('paid_at')
-        ->sum('amount');
-
-    $pinjaman = DB::table('pinjaman')
-        ->whereNotNull('approved_at')
-        ->sum('amount');
-
-    return [
-        'saldo'   => (float)(($simpanan + $cicilan) - $pinjaman),
-        'inflow'  => (float)($simpanan + $cicilan),
-        'outflow' => (float)$pinjaman
-    ];
-}
-
-
-public function statusSaldo($saldo)
-{
-    if ($saldo < 0) {
         return [
             'saldo' => $saldo,
-            'status' => 'KRITIS',
-            'color' => 'RED',
-        ];
-    } elseif ($saldo <= 10000000) {
-        return [
-            'saldo' => $saldo,
-            'status' => 'WASPADA',
-            'color' => 'ORANGE',
+            'status' => 'AMAN',
+            'color' => 'GREEN',
         ];
     }
-
-    return [
-        'saldo' => $saldo,
-        'status' => 'AMAN',
-        'color' => 'GREEN',
-    ];
-}
-
-public function kasSummary()
-{
-    $simpanan = DB::table('simpanan')
-        ->whereNotNull('paid_at')
-        ->sum('amount');
-
-    $cicilan = DB::table('cicilan')
-        ->join('pinjaman', 'pinjaman.id', '=', 'cicilan.loan_id')
-        ->whereNotNull('cicilan.paid_at')
-        ->whereNotNull('pinjaman.approved_at')
-        ->sum('cicilan.amount');
-
-    $pinjaman = DB::table('pinjaman')
-        ->whereNotNull('approved_at')
-        ->sum('amount');
-
-    return [
-        'inflow'  => (float) ($simpanan + $cicilan),
-        'outflow' => (float) $pinjaman,
-        'saldo'   => (float) (($simpanan + $cicilan) - $pinjaman),
-    ];
-}
-
-
-
-
 }

@@ -52,11 +52,11 @@ class PinjamanController extends Controller
 
         // Filter berdasarkan role
         if ($user->role === 'BENDAHARA') {
-            $query->where('status', 'PENDING');
+            $query->where('status', 'PENDING','APPROVED');
         }
 
         if ($user->role === 'KETUA') {
-            $query->where('status', 'APPROVED_BENDAHARA');
+            $query->where('status', 'APPROVED_BENDAHARA','APPROVED');
         }
 
         // Filter opsional
@@ -287,7 +287,6 @@ class PinjamanController extends Controller
             'loan'    => $loan
         ], 201);
     }
-
 
 
 
